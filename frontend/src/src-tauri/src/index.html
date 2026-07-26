@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Mjölnir Security Dashboard</title>
+    <style>
+        body {
+            background-color: #0b0f19;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { color: #38bdf8; font-size: 1.4rem; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin-top: 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        .card { background-color: #1e293b; border-radius: 8px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .log-stream { background-color: #020617; border: 1px solid #334155; border-radius: 6px; height: 320px; overflow-y: auto; padding: 10px; font-family: monospace; font-size: 0.85rem; }
+        .log-entry { margin-bottom: 8px; border-bottom: 1px solid #0f172a; padding-bottom: 6px; }
+        .badge-CRITICAL { color: #f87171; font-weight: bold; }
+        .badge-ALERT { color: #fb923c; font-weight: bold; }
+        .badge-WARN { color: #facc15; font-weight: bold; }
+        .badge-INFO { color: #38bdf8; }
+        ul { margin: 0; padding-left: 20px; }
+        li { margin-bottom: 6px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <h1>Mjölnir // Real-Time Threat Telemetry Dashboard</h1>
+    
+    <div class="grid">
+        <div class="card">
+            <h3>System Status</h3>
+            <p id="status-text">Connecting to Rust Orchestrator...</p>
+            <p><strong>Target Tracked:</strong> game.exe</p>
+            <p><strong>IPC Interface:</strong> Windows Named Pipes</p>
+        </div>
+        <div class="card">
+            <h3>Active Security Vectors</h3>
+            <ul>
+                <li>Process Handle Access Interception</li>
+                <li>DLL Whitelist & Module Verification</li>
+                <li>Transparent Click-Through Overlay Scanner</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top: 20px;">
+        <h3>Live Security Event Feed</h3>
+        <div id="log-container" class="log-stream">
+            <div class="log-entry">[SYSTEM] Waiting for C++ Core connection on \\.\pipe\mjolnir_ipc...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        const { listen } = window.__TAURI__.event;
+        const { invoke } = window.__TAURI__.core;
+
+        async function init() {
+            try {
+                const status = await invoke('get_daemon_status');
+                document.getElementById('status-text').innerText = status;
+            } catch (e) {
+                console.error("Failed to fetch daemon status:", e);
+            }
+
+            // Bind listener to incoming telemetry events from Rust
+            await listen('security-alert', (event) => {
+                const data = event.payload;
+                const container = document.getElementById('log-container');
+                
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                entry.innerHTML = `[<span class="badge-${data.level}">${data.level}</span>] [${data.category}] PID: ${data.pid} — ${data.details}`;
+                
+                container.prepend(entry);
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
