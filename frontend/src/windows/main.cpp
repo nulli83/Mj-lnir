@@ -1,41 +1,28 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <thread>
 #include <chrono>
-#include <iomanip>
-#include <sstream>
 #include <windows.h>
 #include "memory.hpp"
 #include "config.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
+#include "alert.hpp"
 
 const std::wstring TARGET_PROCESS = L"game.exe";
 
-// Unified logging function writing to console and log/sample.log
-void WriteLog(const std::string& level, const std::string& message) {
-    auto now = std::chrono::system_clock::now();
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-
-    std::stringstream ss;
-    ss << "[" << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S") << "] "
-       << "[" << level << "] " << message;
-
-    // 1. Output to console
-    std::cout << ss.str() << "\n";
-
-    // 2. Append to log file
-    std::ofstream logFile("log/sample.log", std::ios::app);
-    if (logFile.is_open()) {
-        logFile << ss.str() << "\n";
-    }
-}
-
 void PrintBanner() {
-    WriteLog("INFO", "[Mjölnir v1.0.0-alpha] - User-Mode Security Daemon Initialized.");
-    WriteLog("INFO", "[+] Monitoring process vectors, modules, and overlays... [ACTIVE]");
-    WriteLog("INFO", "------------------------------------------------------------");
+    Mjolnir::SecurityAlertSystem::DispatchAlert(
+        Mjolnir::ThreatLevel::LOW, 
+        "DAEMON", 
+        "[Mjölnir v1.0.0-alpha] - Security Core Initialized & Armed."
+    );
+    Mjolnir::SecurityAlertSystem::DispatchAlert(
+        Mjolnir::ThreatLevel::LOW, 
+        "DAEMON", 
+        "[+] Active Vectors: Process Handle, DLL Whitelist, Overlay Analysis [ACTIVE]"
+    );
+    std::cout << "------------------------------------------------------------\n";
 }
 
 int main() {
@@ -46,16 +33,28 @@ int main() {
     
     // Load whitelist configuration
     if (config.LoadConfig("whitelist.json")) {
-        WriteLog("INFO", "Successfully loaded whitelist.json configuration.");
+        Mjolnir::SecurityAlertSystem::DispatchAlert(
+            Mjolnir::ThreatLevel::LOW, 
+            "CONFIG", 
+            "Successfully parsed whitelist.json exception rules."
+        );
     } else {
-        WriteLog("WARN", "Failed to load whitelist.json. Running with default rules.");
+        Mjolnir::SecurityAlertSystem::DispatchAlert(
+            Mjolnir::ThreatLevel::MEDIUM, 
+            "CONFIG", 
+            "Failed to load whitelist.json. Operating under restrictive default rules."
+        );
     }
 
     while (true) {
         if (targetPid == 0) {
             targetPid = Mjolnir::MemoryManager::GetProcessIdByName(TARGET_PROCESS);
             if (targetPid != 0) {
-                WriteLog("INFO", "Target process detected. PID: " + std::to_string(targetPid));
+                Mjolnir::SecurityAlertSystem::DispatchAlert(
+                    Mjolnir::ThreatLevel::LOW, 
+                    "MONITOR", 
+                    "Target application acquired. Tracking PID: " + std::to_string(targetPid)
+                );
             }
         } else {
             // Open handle with query and read permissions
@@ -65,18 +64,36 @@ int main() {
             );
             
             if (!hProcess) {
-                WriteLog("WARN", "Lost connection to target process. Resetting PID tracking.");
+                Mjolnir::SecurityAlertSystem::DispatchAlert(
+                    Mjolnir::ThreatLevel::MEDIUM, 
+                    "MONITOR", 
+                    "Lost connection to target process. Resetting tracking state."
+                );
                 targetPid = 0;
             } else {
-                // 1. Audit loaded DLL modules inside the target process
+                // 1. Audit Loaded Modules (DLL Injection Check)
                 auto modules = Mjolnir::ModuleScanner::GetLoadedModules(targetPid);
-                // Optional: Iterate and evaluate modules against rules here
+                for (const auto& mod : modules) {
+                    // Example check against whitelist logic
+                    if (!config.IsWhitelisted(mod)) {
+                        // Log or handle unwhitelisted module injection attempt
+                    }
+                }
 
-                // 2. Audit active windows/overlays across the environment
-                auto activeWindows = Mjolnir::OverlayDetector::GetActiveWindows();
-                for (const auto& win : activeWindows) {
-                    if (win.processId == targetPid) {
-                        // Handle windows belonging to the target process if needed
+                // 2. Audit Suspicious Click-Through Overlays
+                auto suspiciousOverlays = Mjolnir::OverlayDetector::DetectSuspiciousOverlays();
+                for (const auto& overlay : suspiciousOverlays) {
+                    // Filter out system windows, only flag third-party overlays targeting user space
+                    if (overlay.processId != targetPid && overlay.processId != GetCurrentProcessId()) {
+                        std::string alertMsg = "Suspicious overlay detected | Title: '" + overlay.title + 
+                                               "' | Class: " + overlay.className + 
+                                               " | PID: " + std::to_string(overlay.processId);
+                        
+                        Mjolnir::SecurityAlertSystem::DispatchAlert(
+                            Mjolnir::ThreatLevel::HIGH, 
+                            "OVERLAY", 
+                            alertMsg
+                        );
                     }
                 }
 
