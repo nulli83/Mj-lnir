@@ -1,2 +1,2 @@
 # Mj-lnir
-"Mjölnir är ett kraftfullt anti-fusk byggt i C# och C++. Med tung minnesövervakning och blixtsnabb detektion krossar systemet otillåtna injektioner direkt. Designat för att skydda din server med nordisk styrka och precision. När hammaren faller är det Game Over för fuskare.
+Built in Rust and C++, Mjölnir is a powerful anti-cheat system with robust memory monitoring and lightning-fast detection that instantly crushes unauthorised injections. It is designed to protect your server with Nordic strength and precision. When the hammer falls, it’s game over for cheaters.
