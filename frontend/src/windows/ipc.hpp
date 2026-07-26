@@ -13,7 +13,6 @@ namespace Mjolnir {
 
     public:
         bool Connect() {
-            // Try to connect to the Rust orchestrator named pipe server
             hPipe = CreateFileW(
                 pipeName.c_str(),
                 GENERIC_READ | GENERIC_WRITE,
@@ -24,27 +23,28 @@ namespace Mjolnir {
                 NULL
             );
 
-            if (hPipe == INVALID_HANDLE_VALUE) {
-                return false; // Orchestrator might not be running yet
-            }
-
-            // Change pipe read mode to message-type mode if needed
-            DWORD dwMode = PIPE_READMODE_MESSAGE;
-            SetNamedPipeHandleState(hPipe, &dwMode, NULL, NULL);
-
-            return true;
+            return hPipe != INVALID_HANDLE_VALUE;
         }
 
-        bool SendAlert(const std::string& message) {
+        // Serializes security telemetry into a clean JSON payload string
+        bool SendJsonAlert(const std::string& level, const std::string& category, const std::string& details, DWORD pid) {
             if (hPipe == INVALID_HANDLE_VALUE) {
                 if (!Connect()) return false;
             }
 
+            // Manual JSON construction to maintain a dependency-free C++ core
+            std::string jsonPayload = "{"
+                "\"level\":\"" + level + "\","
+                "\"category\":\"" + category + "\","
+                "\"details\":\"" + details + "\","
+                "\"pid\":" + std::to_string(pid) +
+            "}";
+
             DWORD bytesWritten = 0;
             BOOL success = WriteFile(
                 hPipe,
-                message.c_str(),
-                static_cast<DWORD>(message.size()),
+                jsonPayload.c_str(),
+                static_cast<DWORD>(jsonPayload.size()),
                 &bytesWritten,
                 NULL
             );
