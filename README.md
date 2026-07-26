@@ -17,4 +17,4 @@ Mjölnir combines the raw performance and low-level hardware control of C++ with
 
 ## System Requirements
 
-* most likely Windows & Linx
+* most likely Windows & Linux
