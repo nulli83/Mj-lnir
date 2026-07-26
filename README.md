@@ -13,24 +13,8 @@ Mjölnir combines the raw performance and low-level hardware control of C++ with
 
 ##  Core Features & Capabilities
 
-* **Memory Integrity Monitoring:** Scans for unbacked executable memory regions, unapproved page modifications, and suspicious thread creations (`CreateRemoteThread`).
-* **Injection Defense:** Neutralizes standard and manual-mapped DLL injections, handle stripping attempts, and malicious API hooking.
-* **Hardware-Level Awareness:** Audits and enforces platform security configurations (such as IOMMU/VT-d settings) to mitigate low-level hardware threats.
-* **Lightning-Fast Daemon:** Built as a lightweight, resource-efficient command-line service with minimal overhead on the host system.
+* N/A (Still working on it)
 
 ## System Requirements
 
-* **Operating System:** Windows 10 / 11 (x64) / linux (x64)
-* **Build Tools:** 
-  * MSVC (Visual Studio C++ build tools)
-  * Rust (`rustup` with stable toolchain)
-  * CMake (for C++ components)
-
----
-
-## Getting Started
-
-### 1. Cloning the Repository
-```bash
-git clone [https://github.com/your-username/mjolnir.git](https://github.com/your-username/mjolnir.git)
-cd mjolnir
+* most likely Windows & Linx
