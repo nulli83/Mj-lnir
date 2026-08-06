@@ -95,6 +95,26 @@ namespace Mjolnir {
         bool enableBaselineTracking = true;
 
         /*
+         * När true sparas/läses baselines från disk per game-hash.
+         */
+        bool persistBaselines = true;
+
+        /*
+         * Katalog för persistenta baselines.
+         */
+        std::string baselineDirectory = "baselines";
+
+        /*
+         * När true spåras region/handle lifetime över cykler.
+         */
+        bool enableLifetimeTracking = true;
+
+        /*
+         * När true startas twin watchdog-processen.
+         */
+        bool enableTwinWatchdog = true;
+
+        /*
          * När true skyddas och övervakas själva security core.
          */
         bool enableSelfProtect = true;
@@ -139,6 +159,9 @@ namespace Mjolnir {
         int moduleBirth = 40;
         int codeMutation = 65;
         int selfProtect = 50;
+        int regionBirth = 45;
+        int regionEscalate = 55;
+        int handleBirth = 40;
     };
 
     struct ConfigSnapshot {

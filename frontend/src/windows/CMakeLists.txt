@@ -25,7 +25,16 @@ add_executable(mjolnir_core
     config.cpp
 )
 
+add_executable(mjolnir_watchdog
+    watchdog_main.cpp
+)
+
 target_include_directories(mjolnir_core
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_include_directories(mjolnir_watchdog
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
@@ -37,6 +46,13 @@ target_link_libraries(mjolnir_core
         crypt32
         dwmapi
         ntdll
+        advapi32
+        psapi
+)
+
+target_link_libraries(mjolnir_watchdog
+    PRIVATE
+        ntdll
 )
 
 target_compile_definitions(mjolnir_core
@@ -47,10 +63,20 @@ target_compile_definitions(mjolnir_core
         _UNICODE
 )
 
+target_compile_definitions(mjolnir_watchdog
+    PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+        UNICODE
+        _UNICODE
+)
+
 if(MSVC)
     target_compile_options(mjolnir_core PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(mjolnir_watchdog PRIVATE /W4 /permissive- /EHsc)
 else()
     target_compile_options(mjolnir_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(mjolnir_watchdog PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 add_custom_command(
@@ -61,4 +87,14 @@ add_custom_command(
         $<TARGET_FILE_DIR:mjolnir_core>/whitelist.json
     COMMAND ${CMAKE_COMMAND} -E make_directory
         $<TARGET_FILE_DIR:mjolnir_core>/log
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        $<TARGET_FILE_DIR:mjolnir_core>/baselines
+)
+
+add_custom_command(
+    TARGET mjolnir_watchdog
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:mjolnir_watchdog>
+        $<TARGET_FILE_DIR:mjolnir_core>/mjolnir_watchdog.exe
 )

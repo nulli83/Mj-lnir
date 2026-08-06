@@ -20,10 +20,12 @@
 #include "ipc.hpp"
 #include "memory.hpp"
 #include "self_protect.hpp"
+#include "twin_watchdog.hpp"
 
 namespace {
 
     std::atomic<bool> g_running{true};
+    Mjolnir::TwinWatchdogClient g_twin;
 
     void HandleSignal(int) {
         g_running = false;
@@ -74,9 +76,76 @@ namespace {
         Mjolnir::SecurityAlertSystem::Configure(alertSettings);
     }
 
+    bool HasArg(int argc, char** argv, const char* needle) {
+        for (int index = 1; index < argc; ++index) {
+            if (std::string(argv[index]) == needle) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void EnsureTwinWatchdog(bool enabled) {
+        if (!enabled) {
+            return;
+        }
+
+        if (!g_twin.OpenOrCreate(true)) {
+            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                Mjolnir::ThreatLevel::MEDIUM,
+                "WATCHDOG",
+                "Failed to create twin heartbeat mapping."
+            );
+            return;
+        }
+
+        g_twin.PulseCore();
+
+        const auto snapshot = g_twin.Snapshot();
+
+        if (
+            snapshot.watchdogPid != 0 &&
+            Mjolnir::IsProcessAlive(snapshot.watchdogPid)
+        ) {
+            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                Mjolnir::ThreatLevel::LOW,
+                "WATCHDOG",
+                "Twin watchdog already running (PID " +
+                    std::to_string(snapshot.watchdogPid) +
+                    ")."
+            );
+            return;
+        }
+
+        const std::wstring watchdogPath =
+            Mjolnir::GetSelfDirectory() + L"\\mjolnir_watchdog.exe";
+
+        const std::wstring args =
+            L"--parent=" +
+            std::to_wstring(GetCurrentProcessId());
+
+        if (
+            Mjolnir::LaunchSiblingProcess(watchdogPath, args)
+        ) {
+            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                Mjolnir::ThreatLevel::LOW,
+                "WATCHDOG",
+                "Spawned twin watchdog process."
+            );
+        } else {
+            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                Mjolnir::ThreatLevel::MEDIUM,
+                "WATCHDOG",
+                "Could not spawn mjolnir_watchdog.exe. "
+                "Build/place it next to mjolnir_core.exe."
+            );
+        }
+    }
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     std::signal(SIGINT, HandleSignal);
     std::signal(SIGTERM, HandleSignal);
 
@@ -109,12 +178,12 @@ int main() {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.6.0] Security core armed. "
+        "[Mjölnir v1.7.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
         "hooks, inline-hooks, manual-map, devices, image, "
-        "artifacts, services, baseline, self-protect, timing, "
-        "process-watch."
+        "artifacts, services, baseline, lifetime, "
+        "self-protect, twin-watchdog, timing, process-watch."
     );
 
     const auto loadResult =
@@ -137,6 +206,8 @@ int main() {
                 ". Operating with restrictive defaults."
         );
     }
+
+    EnsureTwinWatchdog(config.GetSettings().enableTwinWatchdog);
 
     if (config.GetSettings().enableSelfProtect) {
         const auto selfReport =
@@ -187,9 +258,12 @@ int main() {
 
     DWORD targetPid = 0;
     std::uint64_t cycle = 0;
+    std::uint64_t lastWatchdogHeartbeat = 0;
+    int watchdogStallCount = 0;
 
     while (g_running) {
         Mjolnir::SelfProtect::Pulse();
+        g_twin.PulseCore();
 
         if (config.ReloadIfChanged()) {
             ApplyAlertSettingsFromConfig(alertSettings, config);
@@ -206,6 +280,36 @@ int main() {
         const auto target = config.GetTarget();
         const std::wstring targetName =
             Utf8ToWide(target.processName);
+
+        if (settings.enableTwinWatchdog) {
+            const auto twin = g_twin.Snapshot();
+
+            if (
+                twin.watchdogPid == 0 ||
+                !Mjolnir::IsProcessAlive(twin.watchdogPid)
+            ) {
+                EnsureTwinWatchdog(true);
+                watchdogStallCount = 0;
+            } else if (
+                twin.watchdogHeartbeat == lastWatchdogHeartbeat
+            ) {
+                ++watchdogStallCount;
+
+                if (watchdogStallCount >= 8) {
+                    Mjolnir::SecurityAlertSystem::DispatchAlert(
+                        Mjolnir::ThreatLevel::HIGH,
+                        "WATCHDOG",
+                        "Twin watchdog heartbeat stalled; respawning.",
+                        twin.watchdogPid
+                    );
+                    EnsureTwinWatchdog(true);
+                    watchdogStallCount = 0;
+                }
+            } else {
+                lastWatchdogHeartbeat = twin.watchdogHeartbeat;
+                watchdogStallCount = 0;
+            }
+        }
 
         if (targetPid == 0) {
             targetPid =
@@ -293,6 +397,7 @@ int main() {
 
                     if (enforcement.succeeded) {
                         targetPid = 0;
+                        engine.ResetSessionState();
                     }
                 }
 
@@ -376,6 +481,11 @@ int main() {
     );
 
     Mjolnir::SelfProtect::StopWatchdog();
+    g_twin.Close();
     Mjolnir::SecurityAlertSystem::ClearExternalSink();
+
+    (void)argc;
+    (void)argv;
+    (void)HasArg;
     return 0;
 }

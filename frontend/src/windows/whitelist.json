@@ -20,6 +20,10 @@
     "enable_artifact_scan": true,
     "enable_service_scan": true,
     "enable_baseline_tracking": true,
+    "persist_baselines": true,
+    "baseline_directory": "baselines",
+    "enable_lifetime_tracking": true,
+    "enable_twin_watchdog": true,
     "enable_self_protect": true,
     "enforce_terminate_watched_tools": true,
     "enforce_risk_threshold": 80
@@ -475,6 +479,9 @@
     "suspicious_service": 60,
     "module_birth": 40,
     "code_mutation": 65,
-    "self_protect": 50
+    "self_protect": 50,
+    "region_birth": 45,
+    "region_escalate": 55,
+    "handle_birth": 40
   }
 }

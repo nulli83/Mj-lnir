@@ -48,4 +48,5 @@ cmake-build-*/
 target/
 log/*.jsonl
 log/*.jsonl.*
+baselines/
 !frontend/src/windows/log/sample.log

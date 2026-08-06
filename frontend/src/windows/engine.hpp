@@ -15,6 +15,7 @@
 #include "image_integrity.hpp"
 #include "inline_hooks.hpp"
 #include "integrity.hpp"
+#include "lifetime.hpp"
 #include "manual_map.hpp"
 #include "memory.hpp"
 #include "modules.hpp"
@@ -59,7 +60,8 @@ namespace Mjolnir {
         Artifact,
         Service,
         Baseline,
-        SelfProtect
+        SelfProtect,
+        Lifetime
     };
 
     struct SecurityFinding {
@@ -87,6 +89,7 @@ namespace Mjolnir {
         std::uint64_t cycleCounter_ = 0;
         SessionBaseline baseline_{};
         DWORD baselinePid_ = 0;
+        LifetimeTracker lifetime_{};
 
         static std::string ToLower(std::string value) {
             std::transform(
@@ -183,6 +186,8 @@ namespace Mjolnir {
                     return "BASELINE";
                 case FindingCategory::SelfProtect:
                     return "SELF";
+                case FindingCategory::Lifetime:
+                    return "LIFETIME";
                 default:
                     return "UNKNOWN";
             }
@@ -1170,6 +1175,10 @@ namespace Mjolnir {
                 baselinePid_ = targetPid;
             }
 
+            baseline_.SetBaselineDirectory(
+                snapshot.settings.baselineDirectory
+            );
+
             const ModuleScanResult modules =
                 ModuleScanner::ScanModules(
                     targetPid,
@@ -1217,15 +1226,37 @@ namespace Mjolnir {
                     processHandle,
                     modulePairs,
                     mainPath,
-                    mainBase
+                    mainBase,
+                    snapshot.settings.persistBaselines
                 );
+
+                const std::string message =
+                    baseline_.LoadedFromDisk()
+                        ? (
+                              "Loaded persistent baseline for game build " +
+                              baseline_.GameImageHash().substr(
+                                  0,
+                                  std::min<std::size_t>(
+                                      12,
+                                      baseline_.GameImageHash().size()
+                                  )
+                              )
+                          )
+                        : (
+                              "Created new baseline with " +
+                              std::to_string(modulePairs.size()) +
+                              " modules"
+                          );
 
                 SecurityAlertSystem::DispatchAlert(
                     ThreatLevel::LOW,
                     "BASELINE",
-                    "Session baseline established with " +
-                        std::to_string(modulePairs.size()) +
-                        " modules",
+                    message +
+                        (
+                            snapshot.settings.persistBaselines
+                                ? " (persist=on)"
+                                : " (persist=off)"
+                        ),
                     targetPid
                 );
                 return;
@@ -1258,6 +1289,78 @@ namespace Mjolnir {
             }
         }
 
+        void TrackLifetime(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableLifetimeTracking) {
+                return;
+            }
+
+            lifetime_.BindProcess(targetPid);
+
+            if (cycleCounter_ % 2 == 0) {
+                const LifetimeScanResult regions =
+                    lifetime_.ObserveRegions(
+                        processHandle,
+                        cycleCounter_,
+                        snapshot.riskWeights.regionBirth,
+                        snapshot.riskWeights.regionEscalate
+                    );
+
+                for (const LifetimeFinding& finding : regions.findings) {
+                    EmitFinding(
+                        report,
+                        SecurityFinding{
+                            FindingCategory::Lifetime,
+                            ThreatLevel::LOW,
+                            finding.kind == "region_escalate"
+                                ? "Memory region escalated to executable"
+                                : "Suspicious memory region appeared",
+                            finding.details +
+                                " Reasons=" +
+                                JoinReasons(finding.reasons),
+                            targetPid,
+                            finding.riskScore
+                        }
+                    );
+                }
+            }
+
+            if (
+                snapshot.settings.enableHandleScan &&
+                (cycleCounter_ % 3 == 1)
+            ) {
+                const LifetimeScanResult handles =
+                    lifetime_.ObserveHandles(
+                        targetPid,
+                        snapshot.whitelistedProcesses,
+                        cycleCounter_,
+                        snapshot.riskWeights.handleBirth,
+                        snapshot.riskWeights
+                            .externalProcessHandle
+                    );
+
+                for (const LifetimeFinding& finding : handles.findings) {
+                    EmitFinding(
+                        report,
+                        SecurityFinding{
+                            FindingCategory::Lifetime,
+                            ThreatLevel::LOW,
+                            "External handle appeared mid-session",
+                            finding.details +
+                                " Reasons=" +
+                                JoinReasons(finding.reasons),
+                            targetPid,
+                            finding.riskScore
+                        }
+                    );
+                }
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -1265,6 +1368,7 @@ namespace Mjolnir {
         void ResetSessionState() {
             baseline_.Reset();
             baselinePid_ = 0;
+            lifetime_.Reset();
         }
 
         ScanCycleReport RunCycle(DWORD targetPid) {
@@ -1306,6 +1410,13 @@ namespace Mjolnir {
             );
 
             TrackBaseline(
+                processHandle,
+                targetPid,
+                snapshot,
+                report
+            );
+
+            TrackLifetime(
                 processHandle,
                 targetPid,
                 snapshot,

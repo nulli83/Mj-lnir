@@ -39,6 +39,10 @@ game.exe  <--- audited by ---  mjolnir_core.exe (C++)
 | Image integrity | Disk vs memory `.text` hook-like patches / wiped MZ headers |
 | Artifact scanner | Known cheat mutexes and debugger window titles/classes |
 | Service scanner | Suspicious/vulnerable drivers installed as services |
+| Session/persistent baseline | Module birth + `.text` CRC; saved per game-hash under `baselines/` |
+| Lifetime tracking | Region birth / W→X escalation and mid-session handle appearance |
+| Twin watchdog | Sibling `mjolnir_watchdog.exe` restarts a dead/frozen core |
+| Self-protect | Process mitigations, self-hash, handles-to-AC, in-process watchdog |
 | Device/driver scanner | Known vulnerable/cheat kernel devices and drivers |
 | Timing anomaly | QPC vs tick divergence suggesting single-stepping |
 | Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
@@ -71,6 +75,8 @@ frontend/src/
     image_integrity.hpp # disk vs memory code patches
     artifacts.hpp    # cheat mutexes / debugger windows
     services.hpp     # suspicious Windows services
+    baseline.hpp     # session module/code baselines
+    self_protect.hpp # AC process hardening + watchdog
     devices.hpp      # risky kernel devices/drivers
     timing.hpp       # QPC/tick anomaly checks
     enforce.hpp      # optional terminate-on-threshold
@@ -137,5 +143,5 @@ Alerts are:
 
 ## Status
 
-v1.6.0 — stronger usermode posture with session baselines (module birth /
-code mutation), and self-protect (mitigations, self-hash, handle watch, watchdog).
+v1.7.0 — persistent baselines per game build, region/handle lifetime tracking,
+and twin watchdog process (`mjolnir_watchdog.exe`) for mutual restart.

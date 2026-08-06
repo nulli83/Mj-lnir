@@ -510,6 +510,37 @@ namespace Mjolnir {
                             .enableBaselineTracking
                     );
 
+                candidate.settings.persistBaselines =
+                    ReadBoolean(
+                        settingsObject,
+                        "persist_baselines",
+                        candidate.settings.persistBaselines
+                    );
+
+                candidate.settings.baselineDirectory =
+                    Trim(
+                        ReadString(
+                            settingsObject,
+                            "baseline_directory",
+                            candidate.settings.baselineDirectory
+                        )
+                    );
+
+                candidate.settings.enableLifetimeTracking =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_lifetime_tracking",
+                        candidate.settings
+                            .enableLifetimeTracking
+                    );
+
+                candidate.settings.enableTwinWatchdog =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_twin_watchdog",
+                        candidate.settings.enableTwinWatchdog
+                    );
+
                 candidate.settings.enableSelfProtect =
                     ReadBoolean(
                         settingsObject,
@@ -780,6 +811,27 @@ namespace Mjolnir {
                         riskObject,
                         "self_protect",
                         candidate.riskWeights.selfProtect
+                    );
+
+                candidate.riskWeights.regionBirth =
+                    ReadInteger(
+                        riskObject,
+                        "region_birth",
+                        candidate.riskWeights.regionBirth
+                    );
+
+                candidate.riskWeights.regionEscalate =
+                    ReadInteger(
+                        riskObject,
+                        "region_escalate",
+                        candidate.riskWeights.regionEscalate
+                    );
+
+                candidate.riskWeights.handleBirth =
+                    ReadInteger(
+                        riskObject,
+                        "handle_birth",
+                        candidate.riskWeights.handleBirth
                     );
             }
 
@@ -1722,7 +1774,10 @@ namespace Mjolnir {
             !validRiskWeight(weights.suspiciousService) ||
             !validRiskWeight(weights.moduleBirth) ||
             !validRiskWeight(weights.codeMutation) ||
-            !validRiskWeight(weights.selfProtect)
+            !validRiskWeight(weights.selfProtect) ||
+            !validRiskWeight(weights.regionBirth) ||
+            !validRiskWeight(weights.regionEscalate) ||
+            !validRiskWeight(weights.handleBirth)
         ) {
             errorMessage =
                 "Every risk weight must be between "
