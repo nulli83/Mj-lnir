@@ -33,10 +33,12 @@ game.exe  <--- audited by ---  mjolnir_core.exe (C++)
 | Memory regions | Private RWX / shellcode-style mappings |
 | Thread scanner | Threads whose start address is outside modules |
 | Provenance checks | Unexpected parent process / install path |
+| Hook scanner (IAT) | Critical API imports redirected outside exporter / into private RX |
+| Timing anomaly | QPC vs tick divergence suggesting single-stepping |
 | Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
 
 Default mode is **observe-only** (`settings.observe_only = true` in `whitelist.json`).
-No automatic kills/bans are performed until you intentionally turn enforcement on.
+Set `observe_only` to `false` to enable enforcement: if `highest_risk >= enforce_risk_threshold`, the target process is terminated.
 
 ## Project Layout
 
@@ -54,6 +56,9 @@ frontend/src/
     regions.hpp      # RWX memory region scan
     threads.hpp      # start-address module checks
     process.hpp      # parent + install-path provenance
+    hooks.hpp        # critical IAT hook checks
+    timing.hpp       # QPC/tick anomaly checks
+    enforce.hpp      # optional terminate-on-threshold
     alert.hpp        # alert bus + JSONL logging
     ipc.hpp          # named-pipe client
     config.*         # hot-reloadable whitelist.json
@@ -117,5 +122,5 @@ Alerts are:
 
 ## Status
 
-v1.2.0 — multi-vector engine with handle-table correctness fixes, integrity caching,
-thread/provenance detectors, scan throttling, and quieter alert emission.
+v1.3.0 — adds critical IAT hook scanning, timing anomaly checks, and optional
+enforce mode (`observe_only=false` + `enforce_risk_threshold`).

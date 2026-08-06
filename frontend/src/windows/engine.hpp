@@ -8,6 +8,7 @@
 #include "config.hpp"
 #include "debugger.hpp"
 #include "handles.hpp"
+#include "hooks.hpp"
 #include "integrity.hpp"
 #include "memory.hpp"
 #include "modules.hpp"
@@ -15,6 +16,7 @@
 #include "process.hpp"
 #include "regions.hpp"
 #include "threads.hpp"
+#include "timing.hpp"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -40,7 +42,9 @@ namespace Mjolnir {
         Integrity,
         Memory,
         Thread,
-        Process
+        Process,
+        Hook,
+        Timing
     };
 
     struct SecurityFinding {
@@ -142,6 +146,10 @@ namespace Mjolnir {
                     return "THREAD";
                 case FindingCategory::Process:
                     return "TARGET";
+                case FindingCategory::Hook:
+                    return "HOOK";
+                case FindingCategory::Timing:
+                    return "TIMING";
                 default:
                     return "UNKNOWN";
             }
@@ -726,6 +734,110 @@ namespace Mjolnir {
             CloseHandle(snapshotHandle);
         }
 
+        void ScanHooks(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ModuleScanResult modules =
+                ModuleScanner::ScanModules(
+                    targetPid,
+                    snapshot.whitelistedModules
+                );
+
+            if (!modules.Success() || modules.modules.empty()) {
+                return;
+            }
+
+            std::uintptr_t mainBase = 0;
+            const std::string targetName =
+                ToLower(snapshot.target.processName);
+
+            for (const ModuleInfo& module : modules.modules) {
+                if (ToLower(module.name) == targetName) {
+                    mainBase = module.baseAddress;
+                    break;
+                }
+            }
+
+            if (mainBase == 0) {
+                mainBase = modules.modules.front().baseAddress;
+            }
+
+            const HookScanResult scan =
+                HookDetector::ScanCriticalImports(
+                    processHandle,
+                    targetPid,
+                    mainBase,
+                    snapshot.riskWeights.apiHook
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const HookFinding& hook : scan.hooks) {
+                std::ostringstream details;
+                details
+                    << "Import=" << hook.importedFrom
+                    << "!" << hook.functionName
+                    << " IAT=0x" << std::hex
+                    << hook.iatAddress
+                    << " Resolved=0x"
+                    << hook.resolvedAddress
+                    << std::dec
+                    << " Reasons="
+                    << JoinReasons(hook.reasons);
+
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Hook,
+                        ThreatLevel::LOW,
+                        "Critical API import appears hooked",
+                        details.str(),
+                        targetPid,
+                        hook.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanTiming(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const TimingFinding finding =
+                TimingDetector::InspectLocalProcess(
+                    snapshot.riskWeights.timingAnomaly
+                );
+
+            if (!finding.anomalyDetected) {
+                return;
+            }
+
+            std::ostringstream details;
+            details
+                << "QpcMicros=" << finding.qpcMicros
+                << " TickMicros=" << finding.tickMicros
+                << " Ratio=" << finding.ratio
+                << " Reasons="
+                << JoinReasons(finding.reasons);
+
+            EmitFinding(
+                report,
+                SecurityFinding{
+                    FindingCategory::Timing,
+                    ThreatLevel::LOW,
+                    "Timing anomaly suggests instrumentation or single-stepping",
+                    details.str(),
+                    GetCurrentProcessId(),
+                    finding.riskScore
+                }
+            );
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -777,6 +889,18 @@ namespace Mjolnir {
             );
             ScanThreads(targetPid, snapshot, report);
 
+            if (
+                snapshot.settings.enableHookScan &&
+                (cycleCounter_ % 3 == 2)
+            ) {
+                ScanHooks(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
             /*
              * Dyra skanningar körs mer sällan.
              */
@@ -800,6 +924,13 @@ namespace Mjolnir {
 
             if (cycleCounter_ % 2 == 1) {
                 ScanWatchedProcesses(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableTimingScan &&
+                (cycleCounter_ % 5 == 0)
+            ) {
+                ScanTiming(snapshot, report);
             }
 
             CloseHandle(processHandle);

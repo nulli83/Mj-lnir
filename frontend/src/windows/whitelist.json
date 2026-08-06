@@ -10,7 +10,10 @@
     "allow_unknown_microsoft_modules": true,
     "observe_only": true,
     "enable_handle_scan": true,
-    "enable_memory_region_scan": true
+    "enable_memory_region_scan": true,
+    "enable_hook_scan": true,
+    "enable_timing_scan": true,
+    "enforce_risk_threshold": 80
   },
   "target": {
     "process_name": "game.exe",
@@ -452,6 +455,8 @@
     "debugger_attached": 40,
     "known_bad_hash": 100,
     "trusted_publisher": -25,
-    "trusted_hash": -50
+    "trusted_hash": -50,
+    "api_hook": 45,
+    "timing_anomaly": 35
   }
 }

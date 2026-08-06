@@ -48,6 +48,21 @@ namespace Mjolnir {
          * När true skannas privata RWX-minnesregioner.
          */
         bool enableMemoryRegionScan = true;
+
+        /*
+         * När true kontrolleras IAT för kritiska API-hooks.
+         */
+        bool enableHookScan = true;
+
+        /*
+         * När true körs lokal timing-anomali-detektion.
+         */
+        bool enableTimingScan = true;
+
+        /*
+         * Risktröskel för enforce när observeOnly=false.
+         */
+        int enforceRiskThreshold = 80;
     };
 
     struct TargetConfig {
@@ -68,6 +83,8 @@ namespace Mjolnir {
         int knownBadHash = 100;
         int trustedPublisher = -25;
         int trustedHash = -50;
+        int apiHook = 45;
+        int timingAnomaly = 35;
     };
 
     struct ConfigSnapshot {

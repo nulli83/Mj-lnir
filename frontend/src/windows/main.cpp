@@ -14,6 +14,7 @@
 #include "alert.hpp"
 #include "config.hpp"
 #include "debugger.hpp"
+#include "enforce.hpp"
 #include "engine.hpp"
 #include "integrity.hpp"
 #include "ipc.hpp"
@@ -107,10 +108,10 @@ int main() {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.2.0] Security core armed. "
+        "[Mjölnir v1.3.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
-        "process-watch."
+        "hooks, timing, process-watch."
     );
 
     const auto loadResult =
@@ -213,6 +214,20 @@ int main() {
 
                 const auto report =
                     engine.RunCycle(targetPid);
+
+                if (!settings.observeOnly) {
+                    const auto enforcement =
+                        Mjolnir::EnforcementOfficer::MaybeTerminateTarget(
+                            targetPid,
+                            report.highestRisk,
+                            settings.enforceRiskThreshold,
+                            settings.observeOnly
+                        );
+
+                    if (enforcement.succeeded) {
+                        targetPid = 0;
+                    }
+                }
 
                 ++cycle;
 

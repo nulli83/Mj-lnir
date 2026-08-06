@@ -442,6 +442,28 @@ namespace Mjolnir {
                         candidate.settings
                             .enableMemoryRegionScan
                     );
+
+                candidate.settings.enableHookScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_hook_scan",
+                        candidate.settings.enableHookScan
+                    );
+
+                candidate.settings.enableTimingScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_timing_scan",
+                        candidate.settings.enableTimingScan
+                    );
+
+                candidate.settings.enforceRiskThreshold =
+                    ReadInteger(
+                        settingsObject,
+                        "enforce_risk_threshold",
+                        candidate.settings
+                            .enforceRiskThreshold
+                    );
             }
 
             /*
@@ -610,6 +632,21 @@ namespace Mjolnir {
                         "trusted_hash",
                         candidate.riskWeights
                             .trustedHash
+                    );
+
+                candidate.riskWeights.apiHook =
+                    ReadInteger(
+                        riskObject,
+                        "api_hook",
+                        candidate.riskWeights.apiHook
+                    );
+
+                candidate.riskWeights.timingAnomaly =
+                    ReadInteger(
+                        riskObject,
+                        "timing_anomaly",
+                        candidate.riskWeights
+                            .timingAnomaly
                     );
             }
 
@@ -1541,11 +1578,24 @@ namespace Mjolnir {
             !validRiskWeight(
                 weights.trustedPublisher
             ) ||
-            !validRiskWeight(weights.trustedHash)
+            !validRiskWeight(weights.trustedHash) ||
+            !validRiskWeight(weights.apiHook) ||
+            !validRiskWeight(weights.timingAnomaly)
         ) {
             errorMessage =
                 "Every risk weight must be between "
                 "-1000 and 1000.";
+
+            return false;
+        }
+
+        if (
+            snapshot.settings.enforceRiskThreshold < 1 ||
+            snapshot.settings.enforceRiskThreshold > 1000
+        ) {
+            errorMessage =
+                "enforce_risk_threshold must be between "
+                "1 and 1000.";
 
             return false;
         }
