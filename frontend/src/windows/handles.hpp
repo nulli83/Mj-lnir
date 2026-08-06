@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -23,7 +24,7 @@ namespace Mjolnir {
         std::string ownerProcessName;
         std::string ownerProcessPath;
 
-        USHORT handleValue = 0;
+        ULONG_PTR handleValue = 0;
         ACCESS_MASK grantedAccess = 0;
 
         bool dangerousAccess = false;
@@ -35,6 +36,7 @@ namespace Mjolnir {
         std::vector<ExternalHandleInfo> handles;
         DWORD errorCode = ERROR_SUCCESS;
         std::size_t totalHandlesInspected = 0;
+        std::size_t processHandlesMatched = 0;
 
         bool Success() const {
             return errorCode == ERROR_SUCCESS;
@@ -44,22 +46,27 @@ namespace Mjolnir {
     class HandleScanner {
     private:
         /*
-         * Minimala NT-strukturer för SystemHandleInformation.
-         * WinSDK-exponeringen varierar mellan versioner, så vi
-         * håller dem lokala och stabila.
+         * SystemExtendedHandleInformation (64) — korrekt
+         * layout för moderna 64-bitars Windows.
+         *
+         * Den äldre SystemHandleInformation (16) använder
+         * USHORT för PID och är lätt att läsa fel.
          */
-        struct SystemHandleEntry {
-            ULONG ProcessId;
-            BYTE ObjectTypeNumber;
-            BYTE Flags;
-            USHORT Handle;
+        struct SystemHandleEntryEx {
             PVOID Object;
-            ACCESS_MASK GrantedAccess;
+            ULONG_PTR UniqueProcessId;
+            ULONG_PTR HandleValue;
+            ULONG GrantedAccess;
+            USHORT CreatorBackTraceIndex;
+            USHORT ObjectTypeIndex;
+            ULONG HandleAttributes;
+            ULONG Reserved;
         };
 
-        struct SystemHandleInformation {
-            ULONG HandleCount;
-            SystemHandleEntry Handles[1];
+        struct SystemHandleInformationEx {
+            ULONG_PTR NumberOfHandles;
+            ULONG_PTR Reserved;
+            SystemHandleEntryEx Handles[1];
         };
 
         using NtQuerySystemInformationFn =
@@ -288,11 +295,63 @@ namespace Mjolnir {
             return function;
         }
 
+        static std::vector<std::uint8_t> QueryHandleTable(
+            DWORD& errorCode
+        ) {
+            auto* ntQuery = ResolveNtQuery();
+
+            if (ntQuery == nullptr) {
+                errorCode = ERROR_PROC_NOT_FOUND;
+                return {};
+            }
+
+            constexpr ULONG SystemExtendedHandleInformation = 64;
+
+            ULONG bufferSize = 1 << 22;
+            std::vector<std::uint8_t> buffer(bufferSize);
+            NTSTATUS status = 0;
+
+            for (int attempt = 0; attempt < 10; ++attempt) {
+                ULONG returnLength = 0;
+
+                status = ntQuery(
+                    SystemExtendedHandleInformation,
+                    buffer.data(),
+                    bufferSize,
+                    &returnLength
+                );
+
+                if (NT_SUCCESS(status)) {
+                    errorCode = ERROR_SUCCESS;
+                    return buffer;
+                }
+
+                if (
+                    status !=
+                        static_cast<NTSTATUS>(0xC0000004L)
+                ) {
+                    errorCode = ERROR_INVALID_FUNCTION;
+                    return {};
+                }
+
+                bufferSize =
+                    returnLength > 0
+                        ? returnLength + (1 << 20)
+                        : bufferSize * 2;
+
+                buffer.assign(bufferSize, 0);
+            }
+
+            errorCode = ERROR_INSUFFICIENT_BUFFER;
+            return {};
+        }
+
     public:
         /*
-         * Letar efter processer som håller öppna handles mot
-         * targetPid. Kräver ofta förhöjda rättigheter för att
-         * kunna duplicera handles från andra processer.
+         * Optimerad skanning:
+         * 1) Öppna target själv och hitta Object-pekaren.
+         * 2) Matcha alla handles mot samma Object.
+         * 3) Skippa DuplicateHandle för varje systemhandle.
          */
         static HandleScanResult ScanExternalHandles(
             DWORD targetPid,
@@ -307,61 +366,64 @@ namespace Mjolnir {
                 return result;
             }
 
-            auto* ntQuery = ResolveNtQuery();
+            ScopedHandle selfTarget(
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION,
+                    FALSE,
+                    targetPid
+                )
+            );
 
-            if (ntQuery == nullptr) {
-                result.errorCode = ERROR_PROC_NOT_FOUND;
+            if (!selfTarget.IsValid()) {
+                result.errorCode = GetLastError();
                 return result;
             }
 
-            constexpr ULONG SystemHandleInformation = 16;
+            DWORD queryError = ERROR_SUCCESS;
+            std::vector<std::uint8_t> buffer =
+                QueryHandleTable(queryError);
 
-            ULONG bufferSize = 1 << 20;
-            std::vector<std::uint8_t> buffer(bufferSize);
-            NTSTATUS status = 0;
-
-            for (int attempt = 0; attempt < 8; ++attempt) {
-                ULONG returnLength = 0;
-
-                status = ntQuery(
-                    SystemHandleInformation,
-                    buffer.data(),
-                    bufferSize,
-                    &returnLength
-                );
-
-                if (NT_SUCCESS(status)) {
-                    break;
-                }
-
-                /*
-                 * STATUS_INFO_LENGTH_MISMATCH = 0xC0000004
-                 */
-                if (
-                    status !=
-                        static_cast<NTSTATUS>(0xC0000004L) ||
-                    returnLength == 0
-                ) {
-                    result.errorCode =
-                        ERROR_INVALID_FUNCTION;
-                    return result;
-                }
-
-                bufferSize = returnLength + (1 << 16);
-                buffer.resize(bufferSize);
-            }
-
-            if (!NT_SUCCESS(status)) {
-                result.errorCode = ERROR_INSUFFICIENT_BUFFER;
+            if (buffer.empty()) {
+                result.errorCode = queryError;
                 return result;
             }
 
             auto* handleInfo =
-                reinterpret_cast<SystemHandleInformation*>(
+                reinterpret_cast<SystemHandleInformationEx*>(
                     buffer.data()
                 );
 
             const DWORD selfPid = GetCurrentProcessId();
+            const ULONG_PTR selfHandleValue =
+                reinterpret_cast<ULONG_PTR>(selfTarget.Get());
+
+            PVOID targetObject = nullptr;
+            USHORT processTypeIndex = 0;
+            bool resolvedTargetObject = false;
+
+            for (
+                ULONG_PTR index = 0;
+                index < handleInfo->NumberOfHandles;
+                ++index
+            ) {
+                const SystemHandleEntryEx& entry =
+                    handleInfo->Handles[index];
+
+                if (
+                    entry.UniqueProcessId == selfPid &&
+                    entry.HandleValue == selfHandleValue
+                ) {
+                    targetObject = entry.Object;
+                    processTypeIndex = entry.ObjectTypeIndex;
+                    resolvedTargetObject = true;
+                    break;
+                }
+            }
+
+            if (!resolvedTargetObject || targetObject == nullptr) {
+                result.errorCode = ERROR_NOT_FOUND;
+                return result;
+            }
 
             std::unordered_set<std::string> normalizedTrusted;
 
@@ -369,78 +431,61 @@ namespace Mjolnir {
                 normalizedTrusted.insert(ToLower(name));
             }
 
+            std::unordered_map<DWORD, std::string> pathCache;
+            std::unordered_map<DWORD, int> ownerScores;
+
             for (
-                ULONG index = 0;
-                index < handleInfo->HandleCount;
+                ULONG_PTR index = 0;
+                index < handleInfo->NumberOfHandles;
                 ++index
             ) {
-                const SystemHandleEntry& entry =
+                const SystemHandleEntryEx& entry =
                     handleInfo->Handles[index];
 
                 ++result.totalHandlesInspected;
 
-                if (entry.ProcessId == targetPid) {
+                if (entry.Object != targetObject) {
                     continue;
                 }
 
-                if (entry.ProcessId == selfPid) {
+                if (entry.ObjectTypeIndex != processTypeIndex) {
                     continue;
                 }
 
-                if (entry.ProcessId == 0 || entry.ProcessId == 4) {
+                const DWORD ownerPid =
+                    static_cast<DWORD>(entry.UniqueProcessId);
+
+                if (
+                    ownerPid == targetPid ||
+                    ownerPid == selfPid ||
+                    ownerPid == 0 ||
+                    ownerPid == 4
+                ) {
                     continue;
                 }
 
-                ScopedHandle ownerProcess(
-                    OpenProcess(
-                        PROCESS_DUP_HANDLE |
-                        PROCESS_QUERY_LIMITED_INFORMATION,
-                        FALSE,
-                        entry.ProcessId
-                    )
-                );
-
-                if (!ownerProcess.IsValid()) {
-                    continue;
-                }
-
-                HANDLE duplicated = nullptr;
-
-                const BOOL duplicatedOk = DuplicateHandle(
-                    ownerProcess.Get(),
-                    reinterpret_cast<HANDLE>(
-                        static_cast<ULONG_PTR>(entry.Handle)
-                    ),
-                    GetCurrentProcess(),
-                    &duplicated,
-                    0,
-                    FALSE,
-                    DUPLICATE_SAME_ACCESS
-                );
-
-                if (!duplicatedOk || duplicated == nullptr) {
-                    continue;
-                }
-
-                const DWORD duplicatedPid =
-                    GetProcessId(duplicated);
-
-                CloseHandle(duplicated);
-
-                if (duplicatedPid != targetPid) {
-                    continue;
-                }
+                ++result.processHandlesMatched;
 
                 ExternalHandleInfo info{};
-                info.ownerProcessId = entry.ProcessId;
-                info.handleValue = entry.Handle;
+                info.ownerProcessId = ownerPid;
+                info.handleValue = entry.HandleValue;
                 info.grantedAccess = entry.GrantedAccess;
-                info.ownerProcessPath =
-                    ResolveProcessPath(entry.ProcessId);
-                info.ownerProcessName =
-                    GetBaseName(info.ownerProcessPath);
                 info.dangerousAccess =
                     IsDangerousAccess(entry.GrantedAccess);
+
+                auto pathIterator = pathCache.find(ownerPid);
+
+                if (pathIterator == pathCache.end()) {
+                    pathCache.emplace(
+                        ownerPid,
+                        ResolveProcessPath(ownerPid)
+                    );
+                    pathIterator = pathCache.find(ownerPid);
+                }
+
+                info.ownerProcessPath = pathIterator->second;
+                info.ownerProcessName =
+                    GetBaseName(info.ownerProcessPath);
 
                 const std::string normalizedOwner =
                     ToLower(info.ownerProcessName);
@@ -470,7 +515,6 @@ namespace Mjolnir {
                         0,
                         info.riskScore - 25
                     );
-
                     info.reasons.push_back(
                         "Owner process is trusted/whitelisted"
                     );
@@ -486,9 +530,6 @@ namespace Mjolnir {
                     );
                 }
 
-                /*
-                 * Extremt farliga rättigheter får extra vikt.
-                 */
                 if (
                     (entry.GrantedAccess & PROCESS_VM_WRITE) != 0 ||
                     (entry.GrantedAccess & PROCESS_CREATE_THREAD) != 0
@@ -499,8 +540,29 @@ namespace Mjolnir {
                     );
                 }
 
-                if (info.riskScore >= 20) {
-                    result.handles.push_back(std::move(info));
+                /*
+                 * Aggregera per ägare så en process med många
+                 * handles inte floodar alert-strömmen.
+                 */
+                auto& bestScore = ownerScores[ownerPid];
+
+                if (info.riskScore >= 20 &&
+                    info.riskScore >= bestScore) {
+                    bestScore = info.riskScore;
+
+                    auto existing = std::find_if(
+                        result.handles.begin(),
+                        result.handles.end(),
+                        [ownerPid](const ExternalHandleInfo& item) {
+                            return item.ownerProcessId == ownerPid;
+                        }
+                    );
+
+                    if (existing != result.handles.end()) {
+                        *existing = std::move(info);
+                    } else {
+                        result.handles.push_back(std::move(info));
+                    }
                 }
             }
 

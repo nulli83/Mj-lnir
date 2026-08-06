@@ -12,7 +12,9 @@
 #include "memory.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
+#include "process.hpp"
 #include "regions.hpp"
+#include "threads.hpp"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -36,7 +38,9 @@ namespace Mjolnir {
         Debugger,
         ProcessWatch,
         Integrity,
-        Memory
+        Memory,
+        Thread,
+        Process
     };
 
     struct SecurityFinding {
@@ -53,6 +57,7 @@ namespace Mjolnir {
     struct ScanCycleReport {
         DWORD targetPid = 0;
         std::size_t findings = 0;
+        std::size_t emittedAlerts = 0;
         int highestRisk = 0;
         std::vector<SecurityFinding> alerts;
     };
@@ -60,6 +65,7 @@ namespace Mjolnir {
     class SecurityEngine {
     private:
         ConfigManager& config_;
+        std::uint64_t cycleCounter_ = 0;
 
         static std::string ToLower(std::string value) {
             std::transform(
@@ -132,6 +138,10 @@ namespace Mjolnir {
                     return "INTEGRITY";
                 case FindingCategory::Memory:
                     return "MEMORY";
+                case FindingCategory::Thread:
+                    return "THREAD";
+                case FindingCategory::Process:
+                    return "TARGET";
                 default:
                     return "UNKNOWN";
             }
@@ -151,15 +161,19 @@ namespace Mjolnir {
 
             ++report.findings;
 
-            SecurityAlertSystem::DispatchAlert(
-                finding.level,
-                CategoryName(finding.category),
-                finding.title + " | " + finding.details,
-                finding.processId,
-                finding.riskScore
-            );
+            const bool emitted =
+                SecurityAlertSystem::DispatchAlert(
+                    finding.level,
+                    CategoryName(finding.category),
+                    finding.title + " | " + finding.details,
+                    finding.processId,
+                    finding.riskScore
+                );
 
-            report.alerts.push_back(std::move(finding));
+            if (emitted) {
+                ++report.emittedAlerts;
+                report.alerts.push_back(std::move(finding));
+            }
         }
 
         void ScanModules(
@@ -187,7 +201,7 @@ namespace Mjolnir {
             const bool requireSignature =
                 snapshot.settings.requireValidSignature;
 
-            constexpr std::size_t maxIntegrityChecks = 12;
+            constexpr std::size_t maxIntegrityChecks = 8;
             std::size_t integrityChecks = 0;
 
             for (const ModuleInfo& module : scan.modules) {
@@ -226,7 +240,8 @@ namespace Mjolnir {
                 if (shouldInspectIntegrity) {
                     integrity =
                         IntegrityChecker::InspectFile(
-                            module.path
+                            module.path,
+                            true
                         );
 
                     ++integrityChecks;
@@ -314,6 +329,10 @@ namespace Mjolnir {
                         << "'";
                 }
 
+                if (integrity.fromCache) {
+                    details << " Cache=hit";
+                }
+
                 EmitFinding(
                     report,
                     SecurityFinding{
@@ -341,7 +360,7 @@ namespace Mjolnir {
                 );
 
             for (const WindowInfo& overlay : overlays) {
-                int score = overlay.riskScore +
+                const int score = overlay.riskScore +
                     snapshot.riskWeights.unexpectedOverlay;
 
                 std::ostringstream details;
@@ -387,10 +406,6 @@ namespace Mjolnir {
                 );
 
             if (!scan.Success()) {
-                /*
-                 * Handle-enumeration kan kräva admin.
-                 * Logga mjukt så att övriga vektorer fortsätter.
-                 */
                 SecurityAlertSystem::DispatchAlert(
                     ThreatLevel::LOW,
                     "HANDLE",
@@ -403,6 +418,9 @@ namespace Mjolnir {
             }
 
             for (const ExternalHandleInfo& handle : scan.handles) {
+                std::ostringstream accessHex;
+                accessHex << std::hex << handle.grantedAccess;
+
                 EmitFinding(
                     report,
                     SecurityFinding{
@@ -414,13 +432,7 @@ namespace Mjolnir {
                             std::to_string(
                                 handle.ownerProcessId
                             ) +
-                            " Access=0x" +
-                            [&]() {
-                                std::ostringstream hex;
-                                hex << std::hex
-                                    << handle.grantedAccess;
-                                return hex.str();
-                            }() +
+                            " Access=0x" + accessHex.str() +
                             " Reasons=" +
                             JoinReasons(handle.reasons),
                         handle.ownerProcessId,
@@ -436,7 +448,7 @@ namespace Mjolnir {
             const ConfigSnapshot& snapshot,
             ScanCycleReport& report
         ) {
-            const DebuggerFinding finding =
+            DebuggerFinding finding =
                 DebuggerDetector::InspectProcess(
                     processHandle,
                     snapshot.riskWeights.debuggerAttached
@@ -445,6 +457,15 @@ namespace Mjolnir {
             if (!finding.attached) {
                 return;
             }
+
+            /*
+             * Flera debugger-signaler ska inte stacka till
+             * absurda riskvärden.
+             */
+            finding.riskScore = std::min(
+                finding.riskScore,
+                snapshot.riskWeights.debuggerAttached + 30
+            );
 
             EmitFinding(
                 report,
@@ -504,6 +525,99 @@ namespace Mjolnir {
             }
         }
 
+        void ScanThreads(
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ThreadScanResult scan =
+                ThreadScanner::ScanSuspiciousThreads(
+                    targetPid,
+                    30
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            constexpr std::size_t maxReports = 6;
+            std::size_t reported = 0;
+
+            for (
+                const SuspiciousThreadInfo& thread :
+                scan.threads
+            ) {
+                if (reported >= maxReports) {
+                    break;
+                }
+
+                std::ostringstream details;
+                details
+                    << "TID=" << thread.threadId
+                    << " Start=0x" << std::hex
+                    << thread.startAddress << std::dec
+                    << " Reasons="
+                    << JoinReasons(thread.reasons);
+
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Thread,
+                        ThreatLevel::LOW,
+                        "Thread starts outside loaded modules",
+                        details.str(),
+                        targetPid,
+                        thread.riskScore +
+                            snapshot.riskWeights.unknownModule
+                    }
+                );
+
+                ++reported;
+            }
+        }
+
+        void ScanTargetProcess(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ParentProcessInfo info =
+                ProcessInspector::InspectTarget(
+                    processHandle,
+                    targetPid,
+                    snapshot.target.expectedInstallRoots,
+                    snapshot.whitelistedProcesses,
+                    snapshot.riskWeights.unknownProcess
+                );
+
+            if (info.riskScore < 15) {
+                return;
+            }
+
+            std::ostringstream details;
+            details
+                << "Image='" << info.imagePath << "'"
+                << " Parent='" << info.parentProcessName
+                << "' (PID " << info.parentProcessId << ")"
+                << " ExpectedRoot="
+                << (info.insideExpectedRoot ? "yes" : "no")
+                << " Reasons="
+                << JoinReasons(info.reasons);
+
+            EmitFinding(
+                report,
+                SecurityFinding{
+                    FindingCategory::Process,
+                    ThreatLevel::LOW,
+                    "Target process provenance looks suspicious",
+                    details.str(),
+                    targetPid,
+                    info.riskScore
+                }
+            );
+        }
+
         void ScanWatchedProcesses(
             const ConfigSnapshot& snapshot,
             ScanCycleReport& report
@@ -519,6 +633,8 @@ namespace Mjolnir {
 
             PROCESSENTRY32W entry{};
             entry.dwSize = sizeof(entry);
+
+            std::unordered_set<std::string> alreadyReported;
 
             if (Process32FirstW(snapshotHandle, &entry)) {
                 do {
@@ -548,9 +664,42 @@ namespace Mjolnir {
                         continue;
                     }
 
-                    const int score =
+                    if (
+                        !alreadyReported.insert(processName)
+                             .second
+                    ) {
+                        continue;
+                    }
+
+                    int score =
                         snapshot.riskWeights.unknownProcess +
                         25;
+
+                    /*
+                     * Kända cheat/debug-verktyg får högre vikt.
+                     */
+                    static const std::unordered_set<std::string>
+                        elevatedTools = {
+                            "cheatengine.exe",
+                            "cheatengine-x86_64.exe",
+                            "x64dbg.exe",
+                            "x32dbg.exe",
+                            "x96dbg.exe",
+                            "ida.exe",
+                            "ida64.exe",
+                            "ollydbg.exe",
+                            "processhacker.exe",
+                            "systeminformer.exe",
+                            "reclass.net.exe",
+                            "reclass.exe"
+                        };
+
+                    if (
+                        elevatedTools.find(processName) !=
+                        elevatedTools.end()
+                    ) {
+                        score += 25;
+                    }
 
                     EmitFinding(
                         report,
@@ -589,6 +738,8 @@ namespace Mjolnir {
                 return report;
             }
 
+            ++cycleCounter_;
+
             const ConfigSnapshot snapshot =
                 config_.GetSnapshot();
 
@@ -610,21 +761,36 @@ namespace Mjolnir {
                 return report;
             }
 
+            ScanTargetProcess(
+                processHandle,
+                targetPid,
+                snapshot,
+                report
+            );
             ScanModules(targetPid, snapshot, report);
             ScanOverlays(targetPid, snapshot, report);
-
-            if (snapshot.settings.enableHandleScan) {
-                ScanHandles(targetPid, snapshot, report);
-            }
-
             ScanDebugger(
                 processHandle,
                 targetPid,
                 snapshot,
                 report
             );
+            ScanThreads(targetPid, snapshot, report);
 
-            if (snapshot.settings.enableMemoryRegionScan) {
+            /*
+             * Dyra skanningar körs mer sällan.
+             */
+            if (
+                snapshot.settings.enableHandleScan &&
+                (cycleCounter_ % 3 == 1)
+            ) {
+                ScanHandles(targetPid, snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableMemoryRegionScan &&
+                (cycleCounter_ % 2 == 0)
+            ) {
                 ScanMemoryRegions(
                     processHandle,
                     targetPid,
@@ -632,7 +798,9 @@ namespace Mjolnir {
                 );
             }
 
-            ScanWatchedProcesses(snapshot, report);
+            if (cycleCounter_ % 2 == 1) {
+                ScanWatchedProcesses(snapshot, report);
+            }
 
             CloseHandle(processHandle);
             return report;

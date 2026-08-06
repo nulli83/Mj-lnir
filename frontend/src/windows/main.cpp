@@ -15,6 +15,7 @@
 #include "config.hpp"
 #include "debugger.hpp"
 #include "engine.hpp"
+#include "integrity.hpp"
 #include "ipc.hpp"
 #include "memory.hpp"
 
@@ -61,6 +62,16 @@ namespace {
         return wide;
     }
 
+    void ApplyAlertSettingsFromConfig(
+        Mjolnir::AlertSettings& alertSettings,
+        const Mjolnir::ConfigManager& config
+    ) {
+        const auto settings = config.GetSettings();
+        alertSettings.duplicateCooldownMs =
+            settings.alertCooldownMs;
+        Mjolnir::SecurityAlertSystem::Configure(alertSettings);
+    }
+
 } // namespace
 
 int main() {
@@ -96,26 +107,22 @@ int main() {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.1.0] Security core armed. "
+        "[Mjölnir v1.2.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
-        "integrity, memory-regions, process-watch."
+        "integrity, memory-regions, threads, provenance, "
+        "process-watch."
     );
 
     const auto loadResult =
         config.LoadConfigDetailed("whitelist.json");
 
     if (loadResult) {
+        ApplyAlertSettingsFromConfig(alertSettings, config);
+
         Mjolnir::SecurityAlertSystem::DispatchAlert(
             Mjolnir::ThreatLevel::LOW,
             "CONFIG",
             "Loaded whitelist.json successfully."
-        );
-
-        const auto settings = config.GetSettings();
-        alertSettings.duplicateCooldownMs =
-            settings.alertCooldownMs;
-        Mjolnir::SecurityAlertSystem::Configure(
-            alertSettings
         );
     } else {
         Mjolnir::SecurityAlertSystem::DispatchAlert(
@@ -145,6 +152,9 @@ int main() {
 
     while (g_running) {
         if (config.ReloadIfChanged()) {
+            ApplyAlertSettingsFromConfig(alertSettings, config);
+            Mjolnir::IntegrityChecker::ClearCache();
+
             Mjolnir::SecurityAlertSystem::DispatchAlert(
                 Mjolnir::ThreatLevel::LOW,
                 "CONFIG",
@@ -212,13 +222,17 @@ int main() {
                         "HEARTBEAT",
                         "Scan cycle " +
                             std::to_string(cycle) +
-                            " complete. Findings this cycle: " +
+                            " complete. Findings=" +
                             std::to_string(report.findings) +
-                            ". Highest risk: " +
+                            " Emitted=" +
+                            std::to_string(
+                                report.emittedAlerts
+                            ) +
+                            " HighestRisk=" +
                             std::to_string(
                                 report.highestRisk
                             ) +
-                            ". Observe-only=" +
+                            " ObserveOnly=" +
                             std::string(
                                 settings.observeOnly
                                     ? "true"
