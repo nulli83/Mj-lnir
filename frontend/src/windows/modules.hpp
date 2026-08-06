@@ -443,6 +443,24 @@ namespace Mjolnir {
 
             return suspiciousModules;
         }
+
+        /*
+         * Kompatibilitetsfunktion för äldre anrop.
+         */
+        static std::vector<std::string> GetLoadedModules(
+            DWORD pid
+        ) {
+            const ModuleScanResult scan = ScanModules(pid);
+
+            std::vector<std::string> names;
+            names.reserve(scan.modules.size());
+
+            for (const ModuleInfo& module : scan.modules) {
+                names.push_back(module.name);
+            }
+
+            return names;
+        }
     };
 
 } // namespace Mjolnir

@@ -37,6 +37,17 @@ namespace Mjolnir {
          * Inga processer avslutas och inga automatiska bans utförs.
          */
         bool observeOnly = true;
+
+        /*
+         * När true körs den tyngre handle-enumerationen.
+         * Kräver ofta administratörsrättigheter.
+         */
+        bool enableHandleScan = true;
+
+        /*
+         * När true skannas privata RWX-minnesregioner.
+         */
+        bool enableMemoryRegionScan = true;
     };
 
     struct TargetConfig {
@@ -73,6 +84,7 @@ namespace Mjolnir {
         std::unordered_set<std::string> trustedPublishers;
         std::unordered_set<std::string> whitelistedSignatures;
         std::unordered_set<std::string> trustedHashes;
+        std::unordered_set<std::string> knownBadHashes;
 
         std::unordered_set<std::string> monitorOnlyProcesses;
 
@@ -160,6 +172,10 @@ namespace Mjolnir {
         ) const;
 
         bool IsHashTrusted(
+            std::string_view sha256
+        ) const;
+
+        bool IsHashKnownBad(
             std::string_view sha256
         ) const;
 
