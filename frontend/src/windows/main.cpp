@@ -108,11 +108,11 @@ int main() {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.4.0] Security core armed. "
+        "[Mjölnir v1.5.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
-        "hooks, inline-hooks, manual-map, devices, timing, "
-        "process-watch."
+        "hooks, inline-hooks, manual-map, devices, image, "
+        "artifacts, services, timing, process-watch."
     );
 
     const auto loadResult =
@@ -239,6 +239,16 @@ int main() {
                             settings.enforceRiskThreshold,
                             settings.observeOnly
                         );
+
+                    if (
+                        settings.enforceTerminateWatchedTools
+                    ) {
+                        Mjolnir::EnforcementOfficer::MaybeTerminateWatchedTools(
+                            config.GetSnapshot()
+                                .monitorOnlyProcesses,
+                            settings.observeOnly
+                        );
+                    }
 
                     if (enforcement.succeeded) {
                         targetPid = 0;

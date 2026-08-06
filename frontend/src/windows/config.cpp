@@ -480,6 +480,37 @@ namespace Mjolnir {
                         candidate.settings.enableDeviceScan
                     );
 
+                candidate.settings.enableImageIntegrityScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_image_integrity_scan",
+                        candidate.settings
+                            .enableImageIntegrityScan
+                    );
+
+                candidate.settings.enableArtifactScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_artifact_scan",
+                        candidate.settings.enableArtifactScan
+                    );
+
+                candidate.settings.enableServiceScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_service_scan",
+                        candidate.settings.enableServiceScan
+                    );
+
+                candidate.settings
+                    .enforceTerminateWatchedTools =
+                    ReadBoolean(
+                        settingsObject,
+                        "enforce_terminate_watched_tools",
+                        candidate.settings
+                            .enforceTerminateWatchedTools
+                    );
+
                 candidate.settings.enforceRiskThreshold =
                     ReadInteger(
                         settingsObject,
@@ -691,6 +722,28 @@ namespace Mjolnir {
                         riskObject,
                         "risky_device",
                         candidate.riskWeights.riskyDevice
+                    );
+
+                candidate.riskWeights.imageIntegrity =
+                    ReadInteger(
+                        riskObject,
+                        "image_integrity",
+                        candidate.riskWeights.imageIntegrity
+                    );
+
+                candidate.riskWeights.knownArtifact =
+                    ReadInteger(
+                        riskObject,
+                        "known_artifact",
+                        candidate.riskWeights.knownArtifact
+                    );
+
+                candidate.riskWeights.suspiciousService =
+                    ReadInteger(
+                        riskObject,
+                        "suspicious_service",
+                        candidate.riskWeights
+                            .suspiciousService
                     );
             }
 
@@ -1627,7 +1680,10 @@ namespace Mjolnir {
             !validRiskWeight(weights.timingAnomaly) ||
             !validRiskWeight(weights.inlineHook) ||
             !validRiskWeight(weights.manualMap) ||
-            !validRiskWeight(weights.riskyDevice)
+            !validRiskWeight(weights.riskyDevice) ||
+            !validRiskWeight(weights.imageIntegrity) ||
+            !validRiskWeight(weights.knownArtifact) ||
+            !validRiskWeight(weights.suspiciousService)
         ) {
             errorMessage =
                 "Every risk weight must be between "

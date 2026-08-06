@@ -5,11 +5,13 @@
 #endif
 
 #include "alert.hpp"
+#include "artifacts.hpp"
 #include "config.hpp"
 #include "debugger.hpp"
 #include "devices.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
+#include "image_integrity.hpp"
 #include "inline_hooks.hpp"
 #include "integrity.hpp"
 #include "manual_map.hpp"
@@ -18,6 +20,7 @@
 #include "overlay.hpp"
 #include "process.hpp"
 #include "regions.hpp"
+#include "services.hpp"
 #include "threads.hpp"
 #include "timing.hpp"
 
@@ -50,7 +53,10 @@ namespace Mjolnir {
         Timing,
         InlineHook,
         ManualMap,
-        Device
+        Device,
+        ImageIntegrity,
+        Artifact,
+        Service
     };
 
     struct SecurityFinding {
@@ -162,6 +168,12 @@ namespace Mjolnir {
                     return "MANUAL_MAP";
                 case FindingCategory::Device:
                     return "DEVICE";
+                case FindingCategory::ImageIntegrity:
+                    return "IMAGE";
+                case FindingCategory::Artifact:
+                    return "ARTIFACT";
+                case FindingCategory::Service:
+                    return "SERVICE";
                 default:
                     return "UNKNOWN";
             }
@@ -991,6 +1003,149 @@ namespace Mjolnir {
             }
         }
 
+        void ScanImageIntegrity(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ModuleScanResult modules =
+                ModuleScanner::ScanModules(
+                    targetPid,
+                    snapshot.whitelistedModules
+                );
+
+            if (!modules.Success() || modules.modules.empty()) {
+                return;
+            }
+
+            const std::string targetName =
+                ToLower(snapshot.target.processName);
+
+            const ModuleInfo* mainModule = nullptr;
+
+            for (const ModuleInfo& module : modules.modules) {
+                if (ToLower(module.name) == targetName) {
+                    mainModule = &module;
+                    break;
+                }
+            }
+
+            if (mainModule == nullptr) {
+                mainModule = &modules.modules.front();
+            }
+
+            if (
+                mainModule->path.empty() ||
+                mainModule->baseAddress == 0
+            ) {
+                return;
+            }
+
+            const ImageIntegrityScanResult scan =
+                ImageIntegrityScanner::ScanModule(
+                    processHandle,
+                    mainModule->baseAddress,
+                    mainModule->path,
+                    snapshot.riskWeights.imageIntegrity
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (
+                const ImageIntegrityFinding& finding :
+                scan.findings
+            ) {
+                std::ostringstream details;
+                details
+                    << "Module='" << finding.modulePath << "'"
+                    << " Base=0x" << std::hex
+                    << finding.moduleBase << std::dec
+                    << " Compared=" << finding.bytesCompared
+                    << " HookSites=" << finding.hookLikePatches
+                    << " Reasons="
+                    << JoinReasons(finding.reasons);
+
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::ImageIntegrity,
+                        ThreatLevel::LOW,
+                        "Main module image integrity mismatch",
+                        details.str(),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanArtifacts(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ArtifactScanResult scan =
+                ArtifactScanner::ScanKnownArtifacts(
+                    snapshot.riskWeights.knownArtifact
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const ArtifactFinding& artifact : scan.artifacts) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Artifact,
+                        ThreatLevel::LOW,
+                        "Known cheat/debugger artifact detected",
+                        "Kind=" + artifact.kind +
+                            " Name='" + artifact.name +
+                            "' Reasons=" +
+                            JoinReasons(artifact.reasons),
+                        0,
+                        artifact.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanServices(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ServiceScanResult scan =
+                ServiceScanner::ScanSuspiciousServices(
+                    snapshot.riskWeights.suspiciousService
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const ServiceFinding& service : scan.services) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Service,
+                        ThreatLevel::LOW,
+                        "Suspicious Windows service detected",
+                        "Service='" + service.serviceName +
+                            "' Display='" + service.displayName +
+                            "' State=" +
+                            std::to_string(service.state) +
+                            " Reasons=" +
+                            JoinReasons(service.reasons),
+                        0,
+                        service.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -1108,6 +1263,32 @@ namespace Mjolnir {
                 (cycleCounter_ % 10 == 3)
             ) {
                 ScanDevices(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableImageIntegrityScan &&
+                (cycleCounter_ % 4 == 3)
+            ) {
+                ScanImageIntegrity(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableArtifactScan &&
+                (cycleCounter_ % 3 == 0)
+            ) {
+                ScanArtifacts(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableServiceScan &&
+                (cycleCounter_ % 12 == 5)
+            ) {
+                ScanServices(snapshot, report);
             }
 
             if (

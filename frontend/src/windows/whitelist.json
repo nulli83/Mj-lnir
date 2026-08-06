@@ -16,6 +16,10 @@
     "enable_inline_hook_scan": true,
     "enable_manual_map_scan": true,
     "enable_device_scan": true,
+    "enable_image_integrity_scan": true,
+    "enable_artifact_scan": true,
+    "enable_service_scan": true,
+    "enforce_terminate_watched_tools": true,
     "enforce_risk_threshold": 80
   },
   "target": {
@@ -463,6 +467,9 @@
     "timing_anomaly": 35,
     "inline_hook": 50,
     "manual_map": 55,
-    "risky_device": 70
+    "risky_device": 70,
+    "image_integrity": 60,
+    "known_artifact": 55,
+    "suspicious_service": 60
   }
 }

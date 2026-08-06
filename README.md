@@ -62,6 +62,12 @@ frontend/src/
     threads.hpp      # start-address module checks
     process.hpp      # parent + install-path provenance
     hooks.hpp        # critical IAT hook checks
+    inline_hooks.hpp # prologue trampoline checks
+    manual_map.hpp   # PE images in private RX memory
+    image_integrity.hpp # disk vs memory code patches
+    artifacts.hpp    # cheat mutexes / debugger windows
+    services.hpp     # suspicious Windows services
+    devices.hpp      # risky kernel devices/drivers
     timing.hpp       # QPC/tick anomaly checks
     enforce.hpp      # optional terminate-on-threshold
     alert.hpp        # alert bus + JSONL logging
@@ -127,5 +133,5 @@ Alerts are:
 
 ## Status
 
-v1.3.0 — adds critical IAT hook scanning, timing anomaly checks, and optional
-enforce mode (`observe_only=false` + `enforce_risk_threshold`).
+v1.4.0 — adds inline-hook prologue checks, manual-map PE scanning,
+vulnerable device/driver detection, and window-title target acquisition.

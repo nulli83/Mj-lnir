@@ -75,6 +75,26 @@ namespace Mjolnir {
         bool enableDeviceScan = true;
 
         /*
+         * När true jämförs .text / PE-header mot disk.
+         */
+        bool enableImageIntegrityScan = true;
+
+        /*
+         * När true letas kända cheat-mutexer/fönster.
+         */
+        bool enableArtifactScan = true;
+
+        /*
+         * När true skannas Windows-tjänster efter kända hot.
+         */
+        bool enableServiceScan = true;
+
+        /*
+         * När enforce är aktivt, terminera även kända cheat-verktyg.
+         */
+        bool enforceTerminateWatchedTools = true;
+
+        /*
          * Risktröskel för enforce när observeOnly=false.
          */
         int enforceRiskThreshold = 80;
@@ -103,6 +123,9 @@ namespace Mjolnir {
         int inlineHook = 50;
         int manualMap = 55;
         int riskyDevice = 70;
+        int imageIntegrity = 60;
+        int knownArtifact = 55;
+        int suspiciousService = 60;
     };
 
     struct ConfigSnapshot {
