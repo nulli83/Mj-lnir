@@ -1903,6 +1903,26 @@ namespace Mjolnir {
         }
 
         if (
+            snapshot.settings.evidenceMinSustainedHighSamples < 1 ||
+            snapshot.settings.evidenceMinSustainedHighSamples > 1000
+        ) {
+            errorMessage =
+                "evidence_min_sustained_high_samples must be "
+                "between 1 and 1000.";
+
+            return false;
+        }
+
+        if (
+            snapshot.settings.evidenceSettleCycles > 1000
+        ) {
+            errorMessage =
+                "evidence_settle_cycles must be at most 1000.";
+
+            return false;
+        }
+
+        if (
             snapshot.settings.evidenceMinAverageRisk < 0 ||
             snapshot.settings.evidenceMinAverageRisk > 1000 ||
             snapshot.settings.evidenceMinPeakRisk < 0 ||

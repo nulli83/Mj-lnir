@@ -290,9 +290,14 @@ namespace Mjolnir {
                 << riskScore;
 
             std::string macHex;
+            const bool wantsSignature = !secret.empty();
             const bool signedFrame =
-                !secret.empty() &&
+                wantsSignature &&
                 HmacSha256Hex(secret, canonical.str(), macHex);
+
+            if (wantsSignature && !signedFrame) {
+                return false;
+            }
 
             std::ostringstream json;
 

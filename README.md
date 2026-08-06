@@ -70,7 +70,7 @@ Optional server forward from the agent:
 
 ```bat
 set MJOLNIR_SERVER_URL=http://your-server:8787
-set MJOLNIR_INGEST_KEY=ingest-secret
+set MJOLNIR_INGEST_API_KEY=ingest-secret
 set MJOLNIR_GAME_ID=my-game
 set MJOLNIR_PLAYER_ID=user-42
 ```

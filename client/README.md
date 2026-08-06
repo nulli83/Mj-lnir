@@ -44,7 +44,7 @@ Start the agent first, then the core.
 | --- | --- |
 | `MJOLNIR_IPC_SECRET` | Shared HMAC secret with the C++ core |
 | `MJOLNIR_SERVER_URL` | Studio control-plane URL (enables forward) |
-| `MJOLNIR_INGEST_KEY` | Bearer token for `/v1/sessions` + `/v1/ingest` |
+| `MJOLNIR_INGEST_API_KEY` | Bearer token for `/v1/sessions` + `/v1/ingest` (alias: `MJOLNIR_INGEST_KEY`) |
 | `MJOLNIR_GAME_ID` | Game identifier issued by the studio |
 | `MJOLNIR_PLAYER_ID` | Player / account id from the game launcher |
 | `MJOLNIR_TARGET_PROCESS` | Optional target process name hint |

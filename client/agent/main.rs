@@ -51,9 +51,14 @@ impl ServerConfig {
             .map(|value| value.trim().trim_end_matches('/').to_string())
             .filter(|value| !value.is_empty())?;
 
+        let ingest_key = env::var("MJOLNIR_INGEST_API_KEY")
+            .or_else(|_| env::var("MJOLNIR_INGEST_KEY"))
+            .or_else(|_| env::var("INGEST_API_KEY"))
+            .unwrap_or_default();
+
         Some(Self {
             base_url,
-            ingest_key: env::var("MJOLNIR_INGEST_KEY").unwrap_or_default(),
+            ingest_key,
             game_id: env::var("MJOLNIR_GAME_ID").unwrap_or_else(|_| "demo".into()),
             player_id: env::var("MJOLNIR_PLAYER_ID")
                 .unwrap_or_else(|_| format!("player-{}", std::process::id())),
@@ -142,12 +147,23 @@ impl ServerBridge {
         Ok(())
     }
 
+    fn requeue(&mut self, events: Vec<SecurityPayload>) {
+        for event in events.into_iter().rev() {
+            self.queue.push_front(event);
+        }
+        while self.queue.len() > 200 {
+            self.queue.pop_back();
+        }
+    }
+
     async fn flush(&mut self) -> Result<(), String> {
         if self.queue.is_empty() {
             return Ok(());
         }
 
-        self.ensure_session().await?;
+        if let Err(error) = self.ensure_session().await {
+            return Err(error);
+        }
 
         let session_id = self
             .session_id
@@ -164,26 +180,38 @@ impl ServerBridge {
                 "session_id": session_id,
                 "game_id": self.config.game_id,
                 "player_id": self.config.player_id,
-                "events": events,
+                "events": &events,
             }));
 
         if !self.config.ingest_key.is_empty() {
             request = request.bearer_auth(&self.config.ingest_key);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("ingest failed: {error}"))?;
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                self.requeue(events);
+                return Err(format!("ingest failed: {error}"));
+            }
+        };
 
-        if !response.status().is_success() {
-            return Err(format!("ingest HTTP {}", response.status().as_u16()));
+        let status = response.status();
+        if !status.is_success() {
+            let should_drop_session = status.as_u16() == 404;
+            self.requeue(events);
+            if should_drop_session {
+                self.session_id = None;
+            }
+            return Err(format!("ingest HTTP {}", status.as_u16()));
         }
 
-        let body: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|error| format!("ingest parse failed: {error}"))?;
+        let body: serde_json::Value = match response.json().await {
+            Ok(body) => body,
+            Err(error) => {
+                self.requeue(events);
+                return Err(format!("ingest parse failed: {error}"));
+            }
+        };
 
         if let Some(decision) = body.get("decision") {
             let action = decision
@@ -287,7 +315,8 @@ impl AuthState {
         self.seen_nonces.insert(payload.n);
 
         if self.seen_nonces.len() > 4096 {
-            self.seen_nonces.clear();
+            let watermark = self.last_nonce.saturating_sub(2048);
+            self.seen_nonces.retain(|nonce| *nonce > watermark);
             self.seen_nonces.insert(payload.n);
         }
 
@@ -367,43 +396,48 @@ async fn serve_pipe_session(
     server.connect().await?;
     println!("[+] C++ security core connected.");
 
-    auth.last_nonce = 0;
-    auth.seen_nonces.clear();
-
     let mut stream = server;
     let mut buffer = vec![0u8; 8192];
     let mut pending = String::new();
     let mut last_flush = tokio::time::Instant::now();
+    let mut flush_tick = tokio::time::interval(Duration::from_secs(1));
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
-        match stream.read(&mut buffer).await {
-            Ok(0) => {
-                println!("[-] C++ core disconnected.");
-                break;
-            }
-            Ok(n) => {
-                pending.push_str(&String::from_utf8_lossy(&buffer[..n]));
-                drain_frames(&mut pending, auth, &bridge).await;
+        tokio::select! {
+            result = stream.read(&mut buffer) => {
+                match result {
+                    Ok(0) => {
+                        println!("[-] C++ core disconnected.");
+                        break;
+                    }
+                    Ok(n) => {
+                        pending.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                        drain_frames(&mut pending, auth, &bridge).await;
 
-                if pending.len() > 64 * 1024 {
-                    eprintln!("[!] Discarding oversized incomplete telemetry frame.");
-                    pending.clear();
-                }
-
-                if last_flush.elapsed() >= Duration::from_secs(5) {
-                    if let Some(bridge) = &bridge {
-                        let mut guard = bridge.lock().await;
-                        if let Err(error) = guard.flush().await {
-                            eprintln!("[!] Server flush failed: {error}");
-                            guard.session_id = None;
+                        if pending.len() > 64 * 1024 {
+                            eprintln!("[!] Discarding oversized incomplete telemetry frame.");
+                            pending.clear();
                         }
                     }
-                    last_flush = tokio::time::Instant::now();
+                    Err(error) => {
+                        eprintln!("[ERROR] Pipe read failed: {error}");
+                        break;
+                    }
                 }
             }
-            Err(error) => {
-                eprintln!("[ERROR] Pipe read failed: {error}");
-                break;
+            _ = flush_tick.tick() => {
+                if last_flush.elapsed() < Duration::from_secs(5) {
+                    continue;
+                }
+
+                if let Some(bridge) = &bridge {
+                    let mut guard = bridge.lock().await;
+                    if let Err(error) = guard.flush().await {
+                        eprintln!("[!] Server flush failed: {error}");
+                    }
+                }
+                last_flush = tokio::time::Instant::now();
             }
         }
     }
