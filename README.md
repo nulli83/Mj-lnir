@@ -36,12 +36,16 @@ game.exe  <--- audited by ---  mjolnir_core.exe (C++)
 | Hook scanner (IAT) | Critical API imports redirected outside exporter / into private RX |
 | Inline hook scanner | JMP/trampoline patches on critical API prologues |
 | Manual-map scanner | PE headers inside private executable memory |
+| Image integrity | Disk vs memory `.text` hook-like patches / wiped MZ headers |
+| Artifact scanner | Known cheat mutexes and debugger window titles/classes |
+| Service scanner | Suspicious/vulnerable drivers installed as services |
 | Device/driver scanner | Known vulnerable/cheat kernel devices and drivers |
 | Timing anomaly | QPC vs tick divergence suggesting single-stepping |
 | Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
 
 Default mode is **observe-only** (`settings.observe_only = true` in `whitelist.json`).
 Set `observe_only` to `false` to enable enforcement: if `highest_risk >= enforce_risk_threshold`, the target process is terminated.
+With `enforce_terminate_watched_tools=true`, known cheat/debug tools are also terminated.
 
 Target acquisition uses `target.process_name` and optional `target.window_title`.
 
@@ -133,5 +137,5 @@ Alerts are:
 
 ## Status
 
-v1.4.0 — adds inline-hook prologue checks, manual-map PE scanning,
-vulnerable device/driver detection, and window-title target acquisition.
+v1.6.0 — stronger usermode posture with session baselines (module birth /
+code mutation), and self-protect (mitigations, self-hash, handle watch, watchdog).

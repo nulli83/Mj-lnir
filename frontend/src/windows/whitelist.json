@@ -19,6 +19,8 @@
     "enable_image_integrity_scan": true,
     "enable_artifact_scan": true,
     "enable_service_scan": true,
+    "enable_baseline_tracking": true,
+    "enable_self_protect": true,
     "enforce_terminate_watched_tools": true,
     "enforce_risk_threshold": 80
   },
@@ -470,6 +472,9 @@
     "risky_device": 70,
     "image_integrity": 60,
     "known_artifact": 55,
-    "suspicious_service": 60
+    "suspicious_service": 60,
+    "module_birth": 40,
+    "code_mutation": 65,
+    "self_protect": 50
   }
 }

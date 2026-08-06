@@ -6,6 +6,7 @@
 
 #include "alert.hpp"
 #include "artifacts.hpp"
+#include "baseline.hpp"
 #include "config.hpp"
 #include "debugger.hpp"
 #include "devices.hpp"
@@ -56,7 +57,9 @@ namespace Mjolnir {
         Device,
         ImageIntegrity,
         Artifact,
-        Service
+        Service,
+        Baseline,
+        SelfProtect
     };
 
     struct SecurityFinding {
@@ -82,6 +85,8 @@ namespace Mjolnir {
     private:
         ConfigManager& config_;
         std::uint64_t cycleCounter_ = 0;
+        SessionBaseline baseline_{};
+        DWORD baselinePid_ = 0;
 
         static std::string ToLower(std::string value) {
             std::transform(
@@ -174,6 +179,10 @@ namespace Mjolnir {
                     return "ARTIFACT";
                 case FindingCategory::Service:
                     return "SERVICE";
+                case FindingCategory::Baseline:
+                    return "BASELINE";
+                case FindingCategory::SelfProtect:
+                    return "SELF";
                 default:
                     return "UNKNOWN";
             }
@@ -1146,9 +1155,117 @@ namespace Mjolnir {
             }
         }
 
+        void TrackBaseline(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableBaselineTracking) {
+                return;
+            }
+
+            if (baselinePid_ != targetPid) {
+                baseline_.Reset();
+                baselinePid_ = targetPid;
+            }
+
+            const ModuleScanResult modules =
+                ModuleScanner::ScanModules(
+                    targetPid,
+                    snapshot.whitelistedModules
+                );
+
+            if (!modules.Success() || modules.modules.empty()) {
+                return;
+            }
+
+            std::vector<std::pair<std::string, std::uintptr_t>>
+                modulePairs;
+
+            modulePairs.reserve(modules.modules.size());
+
+            const std::string targetName =
+                ToLower(snapshot.target.processName);
+
+            std::string mainPath;
+            std::uintptr_t mainBase = 0;
+
+            for (const ModuleInfo& module : modules.modules) {
+                modulePairs.emplace_back(
+                    module.name,
+                    module.baseAddress
+                );
+
+                if (
+                    mainBase == 0 &&
+                    ToLower(module.name) == targetName
+                ) {
+                    mainPath = module.path;
+                    mainBase = module.baseAddress;
+                }
+            }
+
+            if (mainBase == 0) {
+                mainPath = modules.modules.front().path;
+                mainBase = modules.modules.front().baseAddress;
+            }
+
+            if (!baseline_.Established()) {
+                baseline_.Establish(
+                    targetPid,
+                    processHandle,
+                    modulePairs,
+                    mainPath,
+                    mainBase
+                );
+
+                SecurityAlertSystem::DispatchAlert(
+                    ThreatLevel::LOW,
+                    "BASELINE",
+                    "Session baseline established with " +
+                        std::to_string(modulePairs.size()) +
+                        " modules",
+                    targetPid
+                );
+                return;
+            }
+
+            const BaselineDiffResult diff = baseline_.Diff(
+                processHandle,
+                modulePairs,
+                snapshot.whitelistedModules,
+                snapshot.riskWeights.moduleBirth,
+                snapshot.riskWeights.codeMutation
+            );
+
+            for (const BaselineFinding& finding : diff.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Baseline,
+                        ThreatLevel::LOW,
+                        finding.kind == "module_birth"
+                            ? "New module appeared after baseline"
+                            : "Module code mutated after baseline",
+                        "Module='" + finding.details +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
+
+        void ResetSessionState() {
+            baseline_.Reset();
+            baselinePid_ = 0;
+        }
 
         ScanCycleReport RunCycle(DWORD targetPid) {
             ScanCycleReport report{};
@@ -1187,6 +1304,14 @@ namespace Mjolnir {
                 snapshot,
                 report
             );
+
+            TrackBaseline(
+                processHandle,
+                targetPid,
+                snapshot,
+                report
+            );
+
             ScanModules(targetPid, snapshot, report);
             ScanOverlays(targetPid, snapshot, report);
             ScanDebugger(

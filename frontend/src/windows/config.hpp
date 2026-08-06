@@ -90,6 +90,16 @@ namespace Mjolnir {
         bool enableServiceScan = true;
 
         /*
+         * När true etableras session-baseline och difftar module birth / code mutation.
+         */
+        bool enableBaselineTracking = true;
+
+        /*
+         * När true skyddas och övervakas själva security core.
+         */
+        bool enableSelfProtect = true;
+
+        /*
          * När enforce är aktivt, terminera även kända cheat-verktyg.
          */
         bool enforceTerminateWatchedTools = true;
@@ -126,6 +136,9 @@ namespace Mjolnir {
         int imageIntegrity = 60;
         int knownArtifact = 55;
         int suspiciousService = 60;
+        int moduleBirth = 40;
+        int codeMutation = 65;
+        int selfProtect = 50;
     };
 
     struct ConfigSnapshot {

@@ -502,6 +502,21 @@ namespace Mjolnir {
                         candidate.settings.enableServiceScan
                     );
 
+                candidate.settings.enableBaselineTracking =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_baseline_tracking",
+                        candidate.settings
+                            .enableBaselineTracking
+                    );
+
+                candidate.settings.enableSelfProtect =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_self_protect",
+                        candidate.settings.enableSelfProtect
+                    );
+
                 candidate.settings
                     .enforceTerminateWatchedTools =
                     ReadBoolean(
@@ -744,6 +759,27 @@ namespace Mjolnir {
                         "suspicious_service",
                         candidate.riskWeights
                             .suspiciousService
+                    );
+
+                candidate.riskWeights.moduleBirth =
+                    ReadInteger(
+                        riskObject,
+                        "module_birth",
+                        candidate.riskWeights.moduleBirth
+                    );
+
+                candidate.riskWeights.codeMutation =
+                    ReadInteger(
+                        riskObject,
+                        "code_mutation",
+                        candidate.riskWeights.codeMutation
+                    );
+
+                candidate.riskWeights.selfProtect =
+                    ReadInteger(
+                        riskObject,
+                        "self_protect",
+                        candidate.riskWeights.selfProtect
                     );
             }
 
@@ -1683,7 +1719,10 @@ namespace Mjolnir {
             !validRiskWeight(weights.riskyDevice) ||
             !validRiskWeight(weights.imageIntegrity) ||
             !validRiskWeight(weights.knownArtifact) ||
-            !validRiskWeight(weights.suspiciousService)
+            !validRiskWeight(weights.suspiciousService) ||
+            !validRiskWeight(weights.moduleBirth) ||
+            !validRiskWeight(weights.codeMutation) ||
+            !validRiskWeight(weights.selfProtect)
         ) {
             errorMessage =
                 "Every risk weight must be between "

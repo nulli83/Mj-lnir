@@ -19,6 +19,7 @@
 #include "integrity.hpp"
 #include "ipc.hpp"
 #include "memory.hpp"
+#include "self_protect.hpp"
 
 namespace {
 
@@ -108,11 +109,12 @@ int main() {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.5.0] Security core armed. "
+        "[Mjölnir v1.6.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
         "hooks, inline-hooks, manual-map, devices, image, "
-        "artifacts, services, timing, process-watch."
+        "artifacts, services, baseline, self-protect, timing, "
+        "process-watch."
     );
 
     const auto loadResult =
@@ -136,6 +138,40 @@ int main() {
         );
     }
 
+    if (config.GetSettings().enableSelfProtect) {
+        const auto selfReport =
+            Mjolnir::SelfProtect::Initialize();
+
+        std::string reasons;
+        for (
+            std::size_t index = 0;
+            index < selfReport.reasons.size();
+            ++index
+        ) {
+            if (index > 0) {
+                reasons += "; ";
+            }
+            reasons += selfReport.reasons[index];
+        }
+
+        Mjolnir::SecurityAlertSystem::DispatchAlert(
+            selfReport.riskScore >= 40
+                ? Mjolnir::ThreatLevel::HIGH
+                : Mjolnir::ThreatLevel::LOW,
+            "SELF",
+            "Self-protect initialized. Mitigations=" +
+                std::string(
+                    selfReport.mitigationsApplied
+                        ? "yes"
+                        : "partial"
+                ) +
+                " Reasons=" +
+                (reasons.empty() ? "none" : reasons),
+            GetCurrentProcessId(),
+            selfReport.riskScore
+        );
+    }
+
     const auto selfDebug =
         Mjolnir::DebuggerDetector::InspectCurrentProcess();
 
@@ -153,6 +189,8 @@ int main() {
     std::uint64_t cycle = 0;
 
     while (g_running) {
+        Mjolnir::SelfProtect::Pulse();
+
         if (config.ReloadIfChanged()) {
             ApplyAlertSettingsFromConfig(alertSettings, config);
             Mjolnir::IntegrityChecker::ClearCache();
@@ -221,12 +259,15 @@ int main() {
                 );
 
                 targetPid = 0;
+                engine.ResetSessionState();
 
                 if (probe != nullptr) {
                     CloseHandle(probe);
                 }
             } else {
                 CloseHandle(probe);
+
+                Mjolnir::SelfProtect::Pulse();
 
                 const auto report =
                     engine.RunCycle(targetPid);
@@ -282,6 +323,40 @@ int main() {
                         targetPid
                     );
                 }
+
+                if (
+                    settings.enableSelfProtect &&
+                    cycle % 15 == 0
+                ) {
+                    const auto selfReport =
+                        Mjolnir::SelfProtect::Inspect(
+                            config.GetSnapshot()
+                                .whitelistedProcesses,
+                            config.GetRiskWeights().selfProtect
+                        );
+
+                    if (selfReport.riskScore >= 40) {
+                        std::string reasons;
+                        for (
+                            std::size_t index = 0;
+                            index < selfReport.reasons.size();
+                            ++index
+                        ) {
+                            if (index > 0) {
+                                reasons += "; ";
+                            }
+                            reasons += selfReport.reasons[index];
+                        }
+
+                        Mjolnir::SecurityAlertSystem::DispatchAlert(
+                            Mjolnir::ThreatLevel::HIGH,
+                            "SELF",
+                            "Self-protect alert: " + reasons,
+                            GetCurrentProcessId(),
+                            selfReport.riskScore
+                        );
+                    }
+                }
             }
         }
 
@@ -300,6 +375,7 @@ int main() {
         "Security core shutting down cleanly."
     );
 
+    Mjolnir::SelfProtect::StopWatchdog();
     Mjolnir::SecurityAlertSystem::ClearExternalSink();
     return 0;
 }
