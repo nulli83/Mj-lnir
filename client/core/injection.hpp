@@ -58,8 +58,7 @@ namespace Mjolnir {
                 Contains(lowered, "\\windows\\temp\\") ||
                 Contains(lowered, "\\downloads\\") ||
                 Contains(lowered, "\\public\\downloads\\") ||
-                Contains(lowered, "\\recycle.bin\\") ||
-                Contains(lowered, "\\desktop\\");
+                Contains(lowered, "\\recycle.bin\\");
         }
 
         static bool LooksLikeRandomName(const std::string& name) {
@@ -166,24 +165,28 @@ namespace Mjolnir {
                     );
                 }
 
-                if (hasOutOfModuleThread) {
+                /*
+                 * Thread correlation only when the module itself already
+                 * looks suspicious — avoids boosting every birth on one
+                 * unrelated out-of-module thread.
+                 */
+                const bool moduleLooksSuspicious =
+                    IsSuspiciousPath(path) ||
+                    path.empty() ||
+                    LooksLikeRandomName(name);
+
+                if (hasOutOfModuleThread && moduleLooksSuspicious) {
                     finding.riskScore += 20;
                     finding.reasons.push_back(
-                        "Concurrent threads start outside loaded modules"
+                        "Suspicious module birth correlated with out-of-module threads"
                     );
-                }
 
-                /*
-                 * Extremt typiskt inject-mönster.
-                 */
-                if (
-                    IsSuspiciousPath(path) &&
-                    hasOutOfModuleThread
-                ) {
-                    finding.riskScore += 15;
-                    finding.reasons.push_back(
-                        "Temp-path module + out-of-module thread correlation"
-                    );
+                    if (IsSuspiciousPath(path)) {
+                        finding.riskScore += 15;
+                        finding.reasons.push_back(
+                            "Temp-path module + out-of-module thread correlation"
+                        );
+                    }
                 }
 
                 result.findings.push_back(std::move(finding));

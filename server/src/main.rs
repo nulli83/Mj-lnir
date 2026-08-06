@@ -74,12 +74,27 @@ async fn maybe_webhook(policy: &GamePolicy, decision: &types::DecisionRecord) {
         return;
     };
 
+    if !(url.starts_with("https://") || url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost")) {
+        warn!("webhook url rejected (must be https or localhost): {url}");
+        return;
+    }
+
     let payload = StudioWebhookPayload {
         kind: "decision",
         decision: decision.clone(),
     };
 
-    let client = reqwest::Client::new();
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            warn!("webhook client init failed: {error}");
+            return;
+        }
+    };
+
     if let Err(error) = client.post(url).json(&payload).send().await {
         warn!("webhook delivery failed: {error}");
     }
@@ -157,6 +172,13 @@ async fn ingest(
         ));
     }
 
+    if body.events.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "events must be a non-empty array"})),
+        ));
+    }
+
     if body.events.len() > 200 {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -182,7 +204,13 @@ async fn ingest(
     }
 
     let policy = load_policy(&state, &body.game_id);
-    let decision = build_decision(&session, &body.events, &policy);
+    let previous = state.store.get_decision(&body.session_id);
+    let decision = build_decision(
+        &session,
+        &body.events,
+        &policy,
+        previous.as_ref(),
+    );
 
     session.last_seen_at = now_ms();
     session.peak_risk = decision.peak_risk;
@@ -296,10 +324,19 @@ async fn put_policy(
 }
 
 fn store_error(error: store::StoreError) -> (StatusCode, Json<Value>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"ok": false, "error": error.to_string()})),
-    )
+    match error {
+        store::StoreError::InvalidKey => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "invalid id/key"})),
+        ),
+        _ => {
+            warn!("storage error: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"ok": false, "error": "storage error"})),
+            )
+        }
+    }
 }
 
 fn app(state: Arc<AppState>) -> Router {
@@ -325,13 +362,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let bind = env_opt("MJOLNIR_BIND").unwrap_or_else(|| "0.0.0.0:8787".into());
     let data_dir = PathBuf::from(env_opt("MJOLNIR_DATA_DIR").unwrap_or_else(|| "data".into()));
-    let environment = env_opt("MJOLNIR_ENV").unwrap_or_else(|| "development".into());
+    let environment = env_opt("MJOLNIR_ENV")
+        .unwrap_or_else(|| "development".into())
+        .to_ascii_lowercase();
+    let is_production = matches!(environment.as_str(), "production" | "prod");
+
+    let ingest_api_key = env_opt("MJOLNIR_INGEST_API_KEY").or_else(|| env_opt("INGEST_API_KEY"));
+    let studio_api_key = env_opt("MJOLNIR_STUDIO_API_KEY").or_else(|| env_opt("STUDIO_API_KEY"));
+
+    if is_production && (ingest_api_key.is_none() || studio_api_key.is_none()) {
+        return Err(
+            "MJOLNIR_ENV=production requires MJOLNIR_INGEST_API_KEY and MJOLNIR_STUDIO_API_KEY"
+                .into(),
+        );
+    }
 
     let state = Arc::new(AppState {
         store: Store::open(&data_dir)?,
-        ingest_api_key: env_opt("MJOLNIR_INGEST_API_KEY").or_else(|| env_opt("INGEST_API_KEY")),
-        studio_api_key: env_opt("MJOLNIR_STUDIO_API_KEY").or_else(|| env_opt("STUDIO_API_KEY")),
-        allow_open_auth: environment != "production",
+        ingest_api_key,
+        studio_api_key,
+        allow_open_auth: !is_production,
         default_kick_threshold: env_opt("DEFAULT_KICK_THRESHOLD")
             .and_then(|value| value.parse().ok())
             .unwrap_or(70),

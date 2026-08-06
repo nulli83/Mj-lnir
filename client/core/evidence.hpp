@@ -94,6 +94,16 @@ namespace Mjolnir {
 
             ++cyclesOnTarget_;
 
+            /*
+             * Don't accumulate attach-time noise into the enforce window.
+             */
+            if (
+                cyclesOnTarget_ <
+                settings_.settleCyclesAfterAttach
+            ) {
+                return;
+            }
+
             EvidenceSample sample{};
             sample.at = std::chrono::steady_clock::now();
             sample.highestRisk = std::max(0, highestRisk);

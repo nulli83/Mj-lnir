@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -12,6 +13,8 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid storage key")]
+    InvalidKey,
 }
 
 #[derive(Default)]
@@ -81,14 +84,32 @@ impl Store {
         Ok(())
     }
 
+    fn sanitize_key(key: &str) -> Result<&str, StoreError> {
+        if key.is_empty()
+            || key.len() > 180
+            || key.contains("..")
+            || !key
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        {
+            return Err(StoreError::InvalidKey);
+        }
+
+        Ok(key)
+    }
+
     fn write_json<T: serde::Serialize>(
         &self,
         folder: &str,
         key: &str,
         value: &T,
     ) -> Result<(), StoreError> {
+        let key = Self::sanitize_key(key)?;
         let path = self.data_dir.join(folder).join(format!("{key}.json"));
-        let tmp = path.with_extension("json.tmp");
+        let tmp = self.data_dir.join(folder).join(format!(
+            "{key}.{}.json.tmp",
+            Uuid::new_v4()
+        ));
         fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
         fs::rename(tmp, path)?;
         Ok(())
