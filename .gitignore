@@ -47,7 +47,6 @@ cmake-build-*/
 .vscode/
 target/
 node_modules/
-package-lock.json
 log/*.jsonl
 log/*.jsonl.*
 baselines/
