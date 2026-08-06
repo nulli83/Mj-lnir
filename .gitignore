@@ -51,5 +51,4 @@ log/*.jsonl
 log/*.jsonl.*
 baselines/
 !client/core/log/sample.log
-server/.wrangler/
-server/worker-configuration.d.ts
+server/data/

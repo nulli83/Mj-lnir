@@ -3,7 +3,7 @@
 **Mjölnir** is a Windows-focused anti-cheat stack with a clear split:
 
 * **Client** — installed on player machines (C++ scanner + Rust agent)
-* **Server** — control plane for game studios (Cloudflare Worker)
+* **Server** — self-hosted control plane for game studios (Rust)
 
 Local detection gathers evidence. **Account actions (kick/ban) belong on the server**, owned by the people who ship the game.
 
@@ -20,10 +20,10 @@ When the hammer falls, cheaters get logged — and when the studio enables enfor
  │                                      v                   │
  │                            mjolnir_agent (Rust)          │
  └──────────────────────────────|───────────────────────────┘
-                                | HTTPS /v1/ingest
+                                | HTTP(S) /v1/ingest
                                 v
                     STUDIO CONTROL PLANE (server)
-                     mjolnir-server (Cloudflare Worker)
+                      mjolnir_server (self-hosted Rust)
                                 |
                     /v1/decisions + optional webhook
                                 v
@@ -43,7 +43,7 @@ client/
   core/       # C++ security core + watchdog + whitelist.json
   agent/      # Rust IPC intake + optional server forwarder
   ui/         # optional Tauri dashboard
-server/       # Cloudflare Worker control plane
+server/       # self-hosted Rust control plane
 shared/       # cross-cutting protocol docs
 ```
 
@@ -69,22 +69,23 @@ cmake --build build --config Release
 Optional server forward from the agent:
 
 ```bat
-set MJOLNIR_SERVER_URL=https://mjolnir-server.<you>.workers.dev
-set MJOLNIR_INGEST_KEY=...
+set MJOLNIR_SERVER_URL=http://your-server:8787
+set MJOLNIR_INGEST_KEY=ingest-secret
 set MJOLNIR_GAME_ID=my-game
 set MJOLNIR_PLAYER_ID=user-42
 ```
 
-### Server (any OS with Node)
+### Server (Linux / Windows / macOS)
 
 ```bash
 cd server
-npm install
-npm test
-npm run dev
+cargo test
+cargo run --release
 ```
 
-See `client/README.md` and `server/README.md` for deploy/auth details.
+Defaults to `http://0.0.0.0:8787`. Set `MJOLNIR_INGEST_API_KEY` and `MJOLNIR_STUDIO_API_KEY` before production.
+
+See `client/README.md` and `server/README.md` for auth and policy details.
 
 ## Trust model (important)
 
@@ -92,8 +93,8 @@ The client runs on a hostile machine. Evidence is valuable for ranking and inves
 
 ## Status
 
-v1.9.0 — client/server split:
+v1.9.1 — self-hosted studio server:
 
 * `client/` packages what players install
-* `server/` Cloudflare Worker exposes sessions, ingest, policy, and decisions for game backends
-* client agent can forward verified telemetry when `MJOLNIR_SERVER_URL` is set
+* `server/` is a Rust binary (sessions, ingest, policy, decisions) — no Cloudflare
+* client agent forwards telemetry when `MJOLNIR_SERVER_URL` is set

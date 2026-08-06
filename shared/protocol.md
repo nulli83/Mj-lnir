@@ -5,8 +5,8 @@
 | Layer | Trust |
 | --- | --- |
 | C++ core → Rust agent (named pipe) | Optional HMAC-SHA256 (`MJOLNIR_IPC_SECRET`) |
-| Client agent → server | Bearer `INGEST_API_KEY` over HTTPS |
-| Game backend → server | Bearer `STUDIO_API_KEY` over HTTPS |
+| Client agent → server | Bearer `MJOLNIR_INGEST_API_KEY` over HTTP(S) |
+| Game backend → server | Bearer `MJOLNIR_STUDIO_API_KEY` over HTTP(S) |
 
 The client can be compromised. Treat ingest evidence as **untrusted input**: useful for ranking and investigation, never as sole proof without server-side game signals (reports, replay, economy anomalies, etc.).
 
