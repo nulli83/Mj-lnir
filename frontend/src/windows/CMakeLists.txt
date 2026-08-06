@@ -20,6 +20,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(nlohmann_json)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 add_executable(mjolnir_core
     main.cpp
     config.cpp
@@ -91,10 +93,3 @@ add_custom_command(
         $<TARGET_FILE_DIR:mjolnir_core>/baselines
 )
 
-add_custom_command(
-    TARGET mjolnir_watchdog
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_FILE:mjolnir_watchdog>
-        $<TARGET_FILE_DIR:mjolnir_core>/mjolnir_watchdog.exe
-)

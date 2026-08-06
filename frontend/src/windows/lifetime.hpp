@@ -57,6 +57,8 @@ namespace Mjolnir {
         std::unordered_map<std::uintptr_t, RegionState> regions_;
         std::unordered_map<std::uint64_t, HandleState> handles_;
         DWORD trackedPid_ = 0;
+        bool regionsPrimed_ = false;
+        bool handlesPrimed_ = false;
 
         static std::uint64_t MakeHandleKey(
             DWORD ownerPid,
@@ -71,6 +73,8 @@ namespace Mjolnir {
             regions_.clear();
             handles_.clear();
             trackedPid_ = 0;
+            regionsPrimed_ = false;
+            handlesPrimed_ = false;
         }
 
         void BindProcess(DWORD pid) {
@@ -122,29 +126,35 @@ namespace Mjolnir {
                 const auto previous = regions_.find(region.baseAddress);
 
                 if (previous == regions_.end()) {
-                    LifetimeFinding finding{};
-                    finding.kind = "region_birth";
-                    finding.riskScore = birthWeight;
+                    if (regionsPrimed_) {
+                        LifetimeFinding finding{};
+                        finding.kind = "region_birth";
+                        finding.riskScore = birthWeight;
 
-                    std::ostringstream details;
-                    details
-                        << "Base=0x" << std::hex << region.baseAddress
-                        << std::dec
-                        << " Size=" << region.regionSize
-                        << " Protect=0x" << std::hex << region.protect
-                        << std::dec;
+                        std::ostringstream details;
+                        details
+                            << "Base=0x" << std::hex
+                            << region.baseAddress
+                            << std::dec
+                            << " Size=" << region.regionSize
+                            << " Protect=0x" << std::hex
+                            << region.protect
+                            << std::dec;
 
-                    finding.details = details.str();
-                    finding.reasons.push_back(
-                        "Suspicious private executable region appeared mid-session"
-                    );
+                        finding.details = details.str();
+                        finding.reasons.push_back(
+                            "Suspicious private executable region appeared mid-session"
+                        );
 
-                    if (region.writable && region.executable) {
-                        finding.riskScore += 15;
-                        finding.reasons.push_back("Region is RWX at birth");
+                        if (region.writable && region.executable) {
+                            finding.riskScore += 15;
+                            finding.reasons.push_back(
+                                "Region is RWX at birth"
+                            );
+                        }
+
+                        result.findings.push_back(std::move(finding));
                     }
-
-                    result.findings.push_back(std::move(finding));
                 } else {
                     state.firstSeenCycle = previous->second.firstSeenCycle;
                     state.seenWritable =
@@ -182,6 +192,7 @@ namespace Mjolnir {
             }
 
             regions_ = std::move(current);
+            regionsPrimed_ = true;
             return result;
         }
 
@@ -224,32 +235,34 @@ namespace Mjolnir {
                 const auto previous = handles_.find(key);
 
                 if (previous == handles_.end()) {
-                    LifetimeFinding finding{};
-                    finding.kind = "handle_birth";
-                    finding.riskScore =
-                        handle.dangerousAccess
-                            ? dangerousWeight
-                            : birthWeight;
+                    if (handlesPrimed_) {
+                        LifetimeFinding finding{};
+                        finding.kind = "handle_birth";
+                        finding.riskScore =
+                            handle.dangerousAccess
+                                ? dangerousWeight
+                                : birthWeight;
 
-                    std::ostringstream details;
-                    details
-                        << "Owner='" << handle.ownerProcessName
-                        << "' PID=" << handle.ownerProcessId
-                        << " Access=0x" << std::hex
-                        << handle.grantedAccess << std::dec;
+                        std::ostringstream details;
+                        details
+                            << "Owner='" << handle.ownerProcessName
+                            << "' PID=" << handle.ownerProcessId
+                            << " Access=0x" << std::hex
+                            << handle.grantedAccess << std::dec;
 
-                    finding.details = details.str();
-                    finding.reasons.push_back(
-                        "New external handle to target appeared mid-session"
-                    );
-
-                    if (handle.dangerousAccess) {
+                        finding.details = details.str();
                         finding.reasons.push_back(
-                            "Handle grants dangerous process access"
+                            "New external handle to target appeared mid-session"
                         );
-                    }
 
-                    result.findings.push_back(std::move(finding));
+                        if (handle.dangerousAccess) {
+                            finding.reasons.push_back(
+                                "Handle grants dangerous process access"
+                            );
+                        }
+
+                        result.findings.push_back(std::move(finding));
+                    }
                 } else {
                     state.firstSeenCycle = previous->second.firstSeenCycle;
                 }
@@ -258,6 +271,7 @@ namespace Mjolnir {
             }
 
             handles_ = std::move(current);
+            handlesPrimed_ = true;
             return result;
         }
     };

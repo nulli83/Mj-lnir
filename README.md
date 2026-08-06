@@ -75,8 +75,10 @@ frontend/src/
     image_integrity.hpp # disk vs memory code patches
     artifacts.hpp    # cheat mutexes / debugger windows
     services.hpp     # suspicious Windows services
-    baseline.hpp     # session module/code baselines
-    self_protect.hpp # AC process hardening + watchdog
+    baseline.hpp     # session + persistent module/code baselines
+    lifetime.hpp     # region/handle birth & escalation tracking
+    self_protect.hpp # AC process hardening + in-process watchdog
+    twin_watchdog.hpp / watchdog_main.cpp  # sibling restarter
     devices.hpp      # risky kernel devices/drivers
     timing.hpp       # QPC/tick anomaly checks
     enforce.hpp      # optional terminate-on-threshold
