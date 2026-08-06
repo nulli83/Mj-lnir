@@ -26,11 +26,13 @@ game.exe  <--- audited by ---  mjolnir_core.exe (C++)
 | Vector | What it catches |
 | --- | --- |
 | Module whitelist + path scoring | Injected DLLs, temp/download loads |
-| Integrity (Authenticode + SHA-256) | Unsigned / untrusted binaries |
+| Integrity (Authenticode + SHA-256, cached) | Unsigned / untrusted / known-bad binaries |
 | Overlay scanner | Click-through ESP / external overlays |
-| Handle scanner | Cheat tools holding `VM_WRITE` / `CREATE_THREAD` |
+| Handle scanner (extended handle table) | Cheat tools holding `VM_WRITE` / `CREATE_THREAD` |
 | Debugger detector | Remote debuggers, debug ports, hardware BPs |
 | Memory regions | Private RWX / shellcode-style mappings |
+| Thread scanner | Threads whose start address is outside modules |
+| Provenance checks | Unexpected parent process / install path |
 | Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
 
 Default mode is **observe-only** (`settings.observe_only = true` in `whitelist.json`).
@@ -48,8 +50,10 @@ frontend/src/
     overlay.hpp      # suspicious overlay detection
     handles.hpp      # external handle enumeration
     debugger.hpp     # debugger / HWBP checks
-    integrity.hpp    # Authenticode + SHA-256
+    integrity.hpp    # Authenticode + SHA-256 (cached)
     regions.hpp      # RWX memory region scan
+    threads.hpp      # start-address module checks
+    process.hpp      # parent + install-path provenance
     alert.hpp        # alert bus + JSONL logging
     ipc.hpp          # named-pipe client
     config.*         # hot-reloadable whitelist.json
@@ -113,4 +117,5 @@ Alerts are:
 
 ## Status
 
-v1.1.0 — core detection engine wired end-to-end with multi-vector scoring, hot-reload config, resilient IPC, and Rust telemetry intake.
+v1.2.0 — multi-vector engine with handle-table correctness fixes, integrity caching,
+thread/provenance detectors, scan throttling, and quieter alert emission.

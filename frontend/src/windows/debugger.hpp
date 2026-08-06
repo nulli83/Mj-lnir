@@ -236,7 +236,7 @@ namespace Mjolnir {
             if (QueryDebugPort(processHandle)) {
                 AddReason(
                     finding,
-                    debuggerRiskWeight,
+                    finding.attached ? 10 : debuggerRiskWeight,
                     "NtQueryInformationProcess(ProcessDebugPort) is non-zero"
                 );
             }
@@ -244,7 +244,7 @@ namespace Mjolnir {
             if (QueryDebugFlags(processHandle)) {
                 AddReason(
                     finding,
-                    debuggerRiskWeight / 2 + 5,
+                    finding.attached ? 8 : (debuggerRiskWeight / 2 + 5),
                     "ProcessDebugFlags indicates active debugging"
                 );
             }
@@ -252,7 +252,7 @@ namespace Mjolnir {
             if (QueryDebugObject(processHandle)) {
                 AddReason(
                     finding,
-                    debuggerRiskWeight,
+                    finding.attached ? 10 : debuggerRiskWeight,
                     "Process owns a debug object handle"
                 );
             }
@@ -260,7 +260,7 @@ namespace Mjolnir {
             if (HasHardwareBreakpoints(processHandle)) {
                 AddReason(
                     finding,
-                    debuggerRiskWeight / 2 + 10,
+                    finding.attached ? 12 : (debuggerRiskWeight / 2 + 10),
                     "Hardware breakpoints detected on one or more threads"
                 );
             }

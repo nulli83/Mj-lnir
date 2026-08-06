@@ -11,11 +11,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
-#include <fstream>
+#include <filesystem>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <system_error>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -34,6 +38,7 @@ namespace Mjolnir {
         bool signedFile = false;
         bool signatureValid = false;
         bool microsoftPublisher = false;
+        bool fromCache = false;
 
         DWORD errorCode = ERROR_SUCCESS;
         std::vector<std::string> reasons;
@@ -41,6 +46,16 @@ namespace Mjolnir {
 
     class IntegrityChecker {
     private:
+        struct CacheEntry {
+            FileIntegrityInfo info;
+            std::filesystem::file_time_type writeTime{};
+            std::chrono::steady_clock::time_point cachedAt{};
+        };
+
+        inline static std::mutex cacheMutex_;
+        inline static std::unordered_map<std::string, CacheEntry>
+            cache_;
+
         static std::string ToLower(std::string value) {
             std::transform(
                 value.begin(),
@@ -144,6 +159,12 @@ namespace Mjolnir {
             }
 
             return hex.str();
+        }
+
+        static std::string NormalizeCacheKey(
+            const std::string& filePath
+        ) {
+            return ToLower(filePath);
         }
 
     public:
@@ -437,16 +458,15 @@ namespace Mjolnir {
         }
 
         static FileIntegrityInfo InspectFile(
-            const std::string& filePath
+            const std::string& filePath,
+            bool useCache = true
         ) {
             FileIntegrityInfo info{};
             info.path = filePath;
 
             if (filePath.empty()) {
                 info.errorCode = ERROR_INVALID_PARAMETER;
-                info.reasons.push_back(
-                    "Empty file path"
-                );
+                info.reasons.push_back("Empty file path");
                 return info;
             }
 
@@ -456,9 +476,7 @@ namespace Mjolnir {
             const DWORD attributes =
                 GetFileAttributesW(widePath.c_str());
 
-            if (
-                attributes == INVALID_FILE_ATTRIBUTES
-            ) {
+            if (attributes == INVALID_FILE_ATTRIBUTES) {
                 info.errorCode = GetLastError();
                 info.reasons.push_back(
                     "File does not exist or is inaccessible"
@@ -467,6 +485,38 @@ namespace Mjolnir {
             }
 
             info.exists = true;
+
+            std::error_code filesystemError;
+            const auto writeTime =
+                std::filesystem::last_write_time(
+                    std::filesystem::path(filePath),
+                    filesystemError
+                );
+
+            const std::string cacheKey =
+                NormalizeCacheKey(filePath);
+
+            if (useCache && !filesystemError) {
+                std::lock_guard<std::mutex> lock(cacheMutex_);
+
+                const auto iterator = cache_.find(cacheKey);
+
+                if (iterator != cache_.end()) {
+                    const auto age =
+                        std::chrono::steady_clock::now() -
+                        iterator->second.cachedAt;
+
+                    if (
+                        iterator->second.writeTime == writeTime &&
+                        age < std::chrono::minutes(10)
+                    ) {
+                        info = iterator->second.info;
+                        info.fromCache = true;
+                        return info;
+                    }
+                }
+            }
+
             info.sha256 = ComputeSha256(filePath);
 
             if (info.sha256.empty()) {
@@ -499,7 +549,36 @@ namespace Mjolnir {
                 );
             }
 
+            if (useCache && !filesystemError) {
+                std::lock_guard<std::mutex> lock(cacheMutex_);
+
+                CacheEntry entry{};
+                entry.info = info;
+                entry.writeTime = writeTime;
+                entry.cachedAt =
+                    std::chrono::steady_clock::now();
+
+                cache_[cacheKey] = std::move(entry);
+
+                /*
+                 * Enkel bound så cachen inte växer utan tak.
+                 */
+                if (cache_.size() > 512) {
+                    cache_.clear();
+                    cache_[cacheKey] = CacheEntry{
+                        info,
+                        writeTime,
+                        std::chrono::steady_clock::now()
+                    };
+                }
+            }
+
             return info;
+        }
+
+        static void ClearCache() {
+            std::lock_guard<std::mutex> lock(cacheMutex_);
+            cache_.clear();
         }
     };
 
