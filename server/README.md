@@ -1,8 +1,8 @@
-# Mjölnir Server (control plane)
+# Mjölnir Server (self-hosted)
 
-This is what **game studios** run. It is the source of truth for policy and enforcement decisions.
+Own control-plane API for **game studios**. No Cloudflare dependency.
 
-Implemented as a **Cloudflare Worker** with KV storage.
+Runs as a Rust binary (`mjolnir_server`) with JSON file persistence under `data/`.
 
 ## Responsibilities
 
@@ -10,10 +10,10 @@ Implemented as a **Cloudflare Worker** with KV storage.
 * Keep per-player sessions
 * Score batches into `observe` / `challenge` / `kick` / `ban`
 * Expose decisions for the game backend to poll
-* Push optional webhooks when action != observe
+* Optional webhooks when action != observe
 * Store per-game policy (thresholds, known-bad hashes, webhook URL)
 
-The server does **not** scan Windows processes. Detection stays on the client.
+Detection stays on the client. This server only decides.
 
 ## API
 
@@ -26,54 +26,60 @@ The server does **not** scan Windows processes. Detection stays on the client.
 | `GET` | `/v1/policy/:game_id` | studio | studio tools |
 | `PUT` | `/v1/policy/:game_id` | studio | studio tools |
 
-### Example: start session (client)
-
-```bash
-curl -X POST "$MJOLNIR_SERVER_URL/v1/sessions" \
-  -H "Authorization: Bearer $INGEST_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"game_id":"my-game","player_id":"user-42","client_version":"1.3.0"}'
-```
-
-### Example: poll decision (game server)
-
-```bash
-curl "$MJOLNIR_SERVER_URL/v1/decisions/$SESSION_ID" \
-  -H "Authorization: Bearer $STUDIO_API_KEY"
-```
-
-### Example: set policy
-
-```bash
-curl -X PUT "$MJOLNIR_SERVER_URL/v1/policy/my-game" \
-  -H "Authorization: Bearer $STUDIO_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kick_threshold": 70,
-    "ban_threshold": 90,
-    "observe_only_default": false,
-    "webhook_url": "https://game.example/internal/mjolnir-webhook",
-    "known_bad_hashes": []
-  }'
-```
-
-## Deploy
+## Run
 
 ```bash
 cd server
-npm install
-npx wrangler kv namespace create mjolnir-kv
-# put the returned id into wrangler.jsonc
-npx wrangler secret put INGEST_API_KEY
-npx wrangler secret put STUDIO_API_KEY
-npm run deploy
+cargo run --release
 ```
 
-Local:
+Default bind: `http://0.0.0.0:8787`
+
+### Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `MJOLNIR_BIND` | Listen address (default `0.0.0.0:8787`) |
+| `MJOLNIR_DATA_DIR` | Persistence directory (default `data`) |
+| `MJOLNIR_ENV` | `development` (open auth if keys unset) or `production` |
+| `MJOLNIR_INGEST_API_KEY` | Bearer key for client agents |
+| `MJOLNIR_STUDIO_API_KEY` | Bearer key for game backends |
+| `DEFAULT_KICK_THRESHOLD` | Default `70` |
+| `DEFAULT_BAN_THRESHOLD` | Default `90` |
+
+In `production`, both API keys are required.
+
+### Example
 
 ```bash
-npm run dev
-npm test
+export MJOLNIR_INGEST_API_KEY=ingest-secret
+export MJOLNIR_STUDIO_API_KEY=studio-secret
+cargo run --release
+
+# client session
+curl -X POST http://127.0.0.1:8787/v1/sessions \
+  -H "Authorization: Bearer ingest-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"game_id":"my-game","player_id":"user-42"}'
+
+# studio decision poll
+curl http://127.0.0.1:8787/v1/decisions/$SESSION_ID \
+  -H "Authorization: Bearer studio-secret"
 ```
 
-In development, auth is open when secrets are unset. Production requires both secrets.
+## Tests
+
+```bash
+cargo test
+```
+
+## Client forward
+
+Point the player agent at this host:
+
+```bat
+set MJOLNIR_SERVER_URL=http://your-server:8787
+set MJOLNIR_INGEST_KEY=ingest-secret
+set MJOLNIR_GAME_ID=my-game
+set MJOLNIR_PLAYER_ID=user-42
+```
