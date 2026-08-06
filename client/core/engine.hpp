@@ -14,6 +14,7 @@
 #include "hooks.hpp"
 #include "image_integrity.hpp"
 #include "inline_hooks.hpp"
+#include "injection.hpp"
 #include "integrity.hpp"
 #include "lifetime.hpp"
 #include "manual_map.hpp"
@@ -61,7 +62,8 @@ namespace Mjolnir {
         Service,
         Baseline,
         SelfProtect,
-        Lifetime
+        Lifetime,
+        Injection
     };
 
     struct SecurityFinding {
@@ -188,6 +190,8 @@ namespace Mjolnir {
                     return "SELF";
                 case FindingCategory::Lifetime:
                     return "LIFETIME";
+                case FindingCategory::Injection:
+                    return "INJECTION";
                 default:
                     return "UNKNOWN";
             }
@@ -1270,6 +1274,9 @@ namespace Mjolnir {
                 snapshot.riskWeights.codeMutation
             );
 
+            std::vector<std::pair<std::string, std::string>>
+                birthModules;
+
             for (const BaselineFinding& finding : diff.findings) {
                 EmitFinding(
                     report,
@@ -1286,6 +1293,54 @@ namespace Mjolnir {
                         finding.riskScore
                     }
                 );
+
+                if (finding.kind != "module_birth") {
+                    continue;
+                }
+
+                std::string path;
+
+                for (const ModuleInfo& module : modules.modules) {
+                    if (ToLower(module.name) == finding.details) {
+                        path = module.path;
+                        break;
+                    }
+                }
+
+                birthModules.emplace_back(finding.details, path);
+            }
+
+            if (
+                snapshot.settings.enableInjectionHeuristics &&
+                !birthModules.empty()
+            ) {
+                const InjectionScanResult injection =
+                    InjectionAnalyzer::AnalyzeNewModules(
+                        targetPid,
+                        birthModules,
+                        snapshot.whitelistedModules,
+                        snapshot.riskWeights.injection
+                    );
+
+                for (
+                    const InjectionFinding& finding :
+                    injection.findings
+                ) {
+                    EmitFinding(
+                        report,
+                        SecurityFinding{
+                            FindingCategory::Injection,
+                            ThreatLevel::LOW,
+                            "Suspicious module birth looks like injection",
+                            "Module='" + finding.moduleName +
+                                "' Path='" + finding.modulePath +
+                                "' Reasons=" +
+                                JoinReasons(finding.reasons),
+                            targetPid,
+                            finding.riskScore
+                        }
+                    );
+                }
             }
         }
 

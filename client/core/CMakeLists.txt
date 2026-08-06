@@ -50,6 +50,7 @@ target_link_libraries(mjolnir_core
         ntdll
         advapi32
         psapi
+        bcrypt
 )
 
 target_link_libraries(mjolnir_watchdog

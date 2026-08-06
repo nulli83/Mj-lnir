@@ -1,149 +1,99 @@
 # Mjölnir
 
-**Mjölnir** is a Windows-focused anti-cheat stack built in **C++** and **Rust**.
-The C++ core performs low-level process inspection. The Rust orchestrator streams telemetry over named pipes to operators and optional UI surfaces.
+**Mjölnir** is a Windows-focused anti-cheat stack with a clear split:
 
-When the hammer falls, cheaters get logged — and in enforce mode, stopped.
+* **Client** — installed on player machines (C++ scanner + Rust agent)
+* **Server** — control plane for game studios (Cloudflare Worker)
+
+Local detection gathers evidence. **Account actions (kick/ban) belong on the server**, owned by the people who ship the game.
+
+When the hammer falls, cheaters get logged — and when the studio enables enforcement, stopped.
 
 ## Architecture
 
 ```
-game.exe  <--- audited by ---  mjolnir_core.exe (C++)
-                                      |
-                                      |  named pipe: \\.\pipe\mjolnir_ipc
-                                      v
-                            mjolnir_orchestrator (Rust)
-                                      |
-                                      v
-                         dashboard / SIEM / operators
+                    PLAYER MACHINE (client)
+ ┌──────────────────────────────────────────────────────────┐
+ │  game.exe  <--- audited by ---  mjolnir_core.exe (C++)   │
+ │                                      |                   │
+ │                                      | named pipe        │
+ │                                      v                   │
+ │                            mjolnir_agent (Rust)          │
+ └──────────────────────────────|───────────────────────────┘
+                                | HTTPS /v1/ingest
+                                v
+                    STUDIO CONTROL PLANE (server)
+                     mjolnir-server (Cloudflare Worker)
+                                |
+                    /v1/decisions + optional webhook
+                                v
+                         game backend / ban systems
 ```
 
-* **C++ Core:** module audits, overlay detection, external handle scanning, debugger checks, Authenticode/SHA-256 integrity, RWX region scanning, risk scoring, JSONL alerts.
-* **Rust Orchestrator:** async named-pipe telemetry intake, reconnect loops, structured event printing, Tauri dashboard feed.
+| Side | Who uses it | Responsibility |
+| --- | --- | --- |
+| `client/` | Players / launcher install | Detect, protect itself, local observe/enforce, forward evidence |
+| `server/` | Game developers | Policy, session scoring, kick/ban decisions, webhooks |
+| `shared/` | Both | Protocol / trust notes |
 
-## Active Detection Vectors
-
-| Vector | What it catches |
-| --- | --- |
-| Module whitelist + path scoring | Injected DLLs, temp/download loads |
-| Integrity (Authenticode + SHA-256, cached) | Unsigned / untrusted / known-bad binaries |
-| Overlay scanner | Click-through ESP / external overlays |
-| Handle scanner (extended handle table) | Cheat tools holding `VM_WRITE` / `CREATE_THREAD` |
-| Debugger detector | Remote debuggers, debug ports, hardware BPs |
-| Memory regions | Private RWX / shellcode-style mappings |
-| Thread scanner | Threads whose start address is outside modules |
-| Provenance checks | Unexpected parent process / install path |
-| Hook scanner (IAT) | Critical API imports redirected outside exporter / into private RX |
-| Inline hook scanner | JMP/trampoline patches on critical API prologues |
-| Manual-map scanner | PE headers inside private executable memory |
-| Image integrity | Disk vs memory `.text` hook-like patches / wiped MZ headers |
-| Artifact scanner | Known cheat mutexes and debugger window titles/classes |
-| Service scanner | Suspicious/vulnerable drivers installed as services |
-| Session/persistent baseline | Module birth + `.text` CRC; saved per game-hash under `baselines/` |
-| Lifetime tracking | Region birth / W→X escalation and mid-session handle appearance |
-| Twin watchdog | Sibling `mjolnir_watchdog.exe` restarts a dead/frozen core |
-| Self-protect | Process mitigations, self-hash, handles-to-AC, in-process watchdog |
-| Device/driver scanner | Known vulnerable/cheat kernel devices and drivers |
-| Timing anomaly | QPC vs tick divergence suggesting single-stepping |
-| Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
-
-Default mode is **observe-only** (`settings.observe_only = true` in `whitelist.json`).
-Set `observe_only` to `false` to enable enforcement: if `highest_risk >= enforce_risk_threshold`, the target process is terminated.
-With `enforce_terminate_watched_tools=true`, known cheat/debug tools are also terminated.
-
-Target acquisition uses `target.process_name` and optional `target.window_title`.
-
-## Project Layout
+## Repository layout
 
 ```
-frontend/src/
-  windows/           # C++ security core
-    main.cpp         # daemon loop
-    engine.hpp       # scan orchestration
-    memory.hpp       # process/memory helpers
-    modules.hpp      # DLL enumeration + risk
-    overlay.hpp      # suspicious overlay detection
-    handles.hpp      # external handle enumeration
-    debugger.hpp     # debugger / HWBP checks
-    integrity.hpp    # Authenticode + SHA-256 (cached)
-    regions.hpp      # RWX memory region scan
-    threads.hpp      # start-address module checks
-    process.hpp      # parent + install-path provenance
-    hooks.hpp        # critical IAT hook checks
-    inline_hooks.hpp # prologue trampoline checks
-    manual_map.hpp   # PE images in private RX memory
-    image_integrity.hpp # disk vs memory code patches
-    artifacts.hpp    # cheat mutexes / debugger windows
-    services.hpp     # suspicious Windows services
-    baseline.hpp     # session + persistent module/code baselines
-    lifetime.hpp     # region/handle birth & escalation tracking
-    self_protect.hpp # AC process hardening + in-process watchdog
-    twin_watchdog.hpp / watchdog_main.cpp  # sibling restarter
-    devices.hpp      # risky kernel devices/drivers
-    timing.hpp       # QPC/tick anomaly checks
-    enforce.hpp      # optional terminate-on-threshold
-    alert.hpp        # alert bus + JSONL logging
-    ipc.hpp          # named-pipe client
-    config.*         # hot-reloadable whitelist.json
-    whitelist.json   # policy / allowlists / weights
-  main.rs            # Rust orchestrator
-  src-tauri/         # optional Tauri dashboard
+client/
+  core/       # C++ security core + watchdog + whitelist.json
+  agent/      # Rust IPC intake + optional server forwarder
+  ui/         # optional Tauri dashboard
+server/       # Cloudflare Worker control plane
+shared/       # cross-cutting protocol docs
 ```
 
-## Build (Windows)
+## Client detection vectors (summary)
 
-### C++ core
+Modules, overlays, handles, debugger, integrity, RWX regions, threads, provenance, IAT/inline hooks, manual-map, image integrity, artifacts, services, baselines, lifetime, injection heuristics, evidence-gated local enforce, twin watchdog, self-protect, timing, process watch, optional HMAC IPC.
+
+Default local mode is **observe-only** (`client/core/whitelist.json`).
+
+## Quick start
+
+### Client (Windows)
 
 ```bat
-cd frontend\src\windows
+cd client\agent
+cargo run --release
+
+cd client\core
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-Requires Visual Studio / MSVC and network access the first time (FetchContent pulls `nlohmann/json`).
-
-### Rust orchestrator
+Optional server forward from the agent:
 
 ```bat
-cd frontend\src
-cargo run --release
+set MJOLNIR_SERVER_URL=https://mjolnir-server.<you>.workers.dev
+set MJOLNIR_INGEST_KEY=...
+set MJOLNIR_GAME_ID=my-game
+set MJOLNIR_PLAYER_ID=user-42
 ```
 
-Start the Rust orchestrator first so the named pipe exists, then launch `mjolnir_core.exe`.
+### Server (any OS with Node)
 
-## Configuration
-
-Edit `frontend/src/windows/whitelist.json`:
-
-* `target.process_name` — process to protect
-* `whitelisted_modules` / `whitelisted_processes`
-* `allowed_overlay_processes`
-* `trusted_publishers` / `trusted_hashes`
-* `monitor_only_processes` — tooling that should raise alerts when present
-* `risk_weights` — tune scoring per vector
-* `settings.observe_only` — keep `true` while tuning
-* `settings.scan_interval_ms` — scan cadence
-* Hot reload: save the file and the core reloads automatically
-
-## Telemetry
-
-Alerts are:
-
-1. printed to console
-2. appended to `log/mjolnir.jsonl`
-3. streamed over IPC as newline-delimited JSON:
-
-```json
-{"level":"HIGH","category":"MODULE","details":"...","pid":1234,"risk_score":65}
+```bash
+cd server
+npm install
+npm test
+npm run dev
 ```
 
-## System Requirements
+See `client/README.md` and `server/README.md` for deploy/auth details.
 
-* Windows 10/11 x64 for the security core
-* Administrator privileges recommended for full handle enumeration
-* Linux host is fine for editing; Windows is required to compile/run the C++ core
+## Trust model (important)
+
+The client runs on a hostile machine. Evidence is valuable for ranking and investigation, but studios should combine it with their own game-server signals before permanent bans. Details: `shared/protocol.md`.
 
 ## Status
 
-v1.7.0 — persistent baselines per game build, region/handle lifetime tracking,
-and twin watchdog process (`mjolnir_watchdog.exe`) for mutual restart.
+v1.9.0 — client/server split:
+
+* `client/` packages what players install
+* `server/` Cloudflare Worker exposes sessions, ingest, policy, and decisions for game backends
+* client agent can forward verified telemetry when `MJOLNIR_SERVER_URL` is set

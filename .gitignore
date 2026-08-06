@@ -46,7 +46,10 @@ cmake-build-*/
 .vs/
 .vscode/
 target/
+node_modules/
 log/*.jsonl
 log/*.jsonl.*
 baselines/
-!frontend/src/windows/log/sample.log
+!client/core/log/sample.log
+server/.wrangler/
+server/worker-configuration.d.ts

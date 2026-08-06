@@ -25,6 +25,16 @@
     "enable_lifetime_tracking": true,
     "enable_twin_watchdog": true,
     "enable_self_protect": true,
+    "enable_injection_heuristics": true,
+    "enable_evidence_window": true,
+    "evidence_window_ms": 45000,
+    "evidence_min_samples": 3,
+    "evidence_min_average_risk": 55,
+    "evidence_min_peak_risk": 80,
+    "evidence_sustained_high_risk": 50,
+    "evidence_min_sustained_high_samples": 3,
+    "evidence_settle_cycles": 5,
+    "ipc_hmac_secret": "",
     "enforce_terminate_watched_tools": true,
     "enforce_risk_threshold": 80
   },
@@ -482,6 +492,7 @@
     "self_protect": 50,
     "region_birth": 45,
     "region_escalate": 55,
-    "handle_birth": 40
+    "handle_birth": 40,
+    "injection": 50
   }
 }

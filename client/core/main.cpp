@@ -16,6 +16,7 @@
 #include "debugger.hpp"
 #include "enforce.hpp"
 #include "engine.hpp"
+#include "evidence.hpp"
 #include "integrity.hpp"
 #include "ipc.hpp"
 #include "memory.hpp"
@@ -26,6 +27,49 @@ namespace {
 
     std::atomic<bool> g_running{true};
     Mjolnir::TwinWatchdogClient g_twin;
+
+    std::string ResolveIpcHmacSecret(
+        const Mjolnir::ConfigSettings& settings
+    ) {
+        char buffer[1024] = {};
+        const DWORD length = GetEnvironmentVariableA(
+            "MJOLNIR_IPC_SECRET",
+            buffer,
+            static_cast<DWORD>(sizeof(buffer))
+        );
+
+        if (length > 0 && length < sizeof(buffer)) {
+            return std::string(buffer, length);
+        }
+
+        return settings.ipcHmacSecret;
+    }
+
+    void ApplyIpcSecret(
+        Mjolnir::IpcClient& ipcClient,
+        const Mjolnir::ConfigManager& config
+    ) {
+        ipcClient.SetHmacSecret(
+            ResolveIpcHmacSecret(config.GetSettings())
+        );
+    }
+
+    Mjolnir::EvidenceSettings MakeEvidenceSettings(
+        const Mjolnir::ConfigSettings& settings
+    ) {
+        Mjolnir::EvidenceSettings evidence{};
+        evidence.windowMs = settings.evidenceWindowMs;
+        evidence.minSamples = settings.evidenceMinSamples;
+        evidence.minAverageRisk = settings.evidenceMinAverageRisk;
+        evidence.minPeakRisk = settings.evidenceMinPeakRisk;
+        evidence.sustainedHighRisk =
+            settings.evidenceSustainedHighRisk;
+        evidence.minSustainedHighSamples =
+            settings.evidenceMinSustainedHighSamples;
+        evidence.settleCyclesAfterAttach =
+            settings.evidenceSettleCycles;
+        return evidence;
+    }
 
     void HandleSignal(int) {
         g_running = false;
@@ -152,6 +196,7 @@ int main(int argc, char** argv) {
     Mjolnir::ConfigManager config("whitelist.json");
     Mjolnir::IpcClient ipcClient;
     Mjolnir::SecurityEngine engine(config);
+    Mjolnir::EvidenceWindow evidenceWindow;
 
     Mjolnir::AlertSettings alertSettings{};
     alertSettings.logPath = "log/mjolnir.jsonl";
@@ -178,12 +223,13 @@ int main(int argc, char** argv) {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.7.0] Security core armed. "
+        "[Mjölnir v1.8.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
         "hooks, inline-hooks, manual-map, devices, image, "
-        "artifacts, services, baseline, lifetime, "
-        "self-protect, twin-watchdog, timing, process-watch."
+        "artifacts, services, baseline, lifetime, injection, "
+        "evidence-window, hmac-ipc, self-protect, "
+        "twin-watchdog, timing, process-watch."
     );
 
     const auto loadResult =
@@ -191,13 +237,22 @@ int main(int argc, char** argv) {
 
     if (loadResult) {
         ApplyAlertSettingsFromConfig(alertSettings, config);
+        ApplyIpcSecret(ipcClient, config);
+        evidenceWindow.Configure(
+            MakeEvidenceSettings(config.GetSettings())
+        );
 
         Mjolnir::SecurityAlertSystem::DispatchAlert(
             Mjolnir::ThreatLevel::LOW,
             "CONFIG",
-            "Loaded whitelist.json successfully."
+            "Loaded whitelist.json successfully. IPC HMAC=" +
+                std::string(
+                    ipcClient.HasHmacSecret() ? "on" : "off"
+                )
         );
     } else {
+        ApplyIpcSecret(ipcClient, config);
+
         Mjolnir::SecurityAlertSystem::DispatchAlert(
             Mjolnir::ThreatLevel::MEDIUM,
             "CONFIG",
@@ -267,12 +322,21 @@ int main(int argc, char** argv) {
 
         if (config.ReloadIfChanged()) {
             ApplyAlertSettingsFromConfig(alertSettings, config);
+            ApplyIpcSecret(ipcClient, config);
+            evidenceWindow.Configure(
+                MakeEvidenceSettings(config.GetSettings())
+            );
             Mjolnir::IntegrityChecker::ClearCache();
 
             Mjolnir::SecurityAlertSystem::DispatchAlert(
                 Mjolnir::ThreatLevel::LOW,
                 "CONFIG",
-                "Configuration reloaded from disk."
+                "Configuration reloaded from disk. IPC HMAC=" +
+                    std::string(
+                        ipcClient.HasHmacSecret()
+                            ? "on"
+                            : "off"
+                    )
             );
         }
 
@@ -364,6 +428,7 @@ int main(int argc, char** argv) {
 
                 targetPid = 0;
                 engine.ResetSessionState();
+                evidenceWindow.Reset();
 
                 if (probe != nullptr) {
                     CloseHandle(probe);
@@ -376,14 +441,49 @@ int main(int argc, char** argv) {
                 const auto report =
                     engine.RunCycle(targetPid);
 
+                evidenceWindow.Configure(
+                    MakeEvidenceSettings(settings)
+                );
+                evidenceWindow.Push(
+                    targetPid,
+                    report.highestRisk,
+                    report.findings,
+                    report.emittedAlerts
+                );
+
+                const auto evidence =
+                    evidenceWindow.Evaluate();
+
                 if (!settings.observeOnly) {
-                    const auto enforcement =
-                        Mjolnir::EnforcementOfficer::MaybeTerminateTarget(
-                            targetPid,
-                            report.highestRisk,
-                            settings.enforceRiskThreshold,
-                            settings.observeOnly
-                        );
+                    Mjolnir::EnforcementResult enforcement{};
+
+                    if (settings.enableEvidenceWindow) {
+                        if (evidence.shouldEnforce) {
+                            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                                Mjolnir::ThreatLevel::CRITICAL,
+                                "EVIDENCE",
+                                evidence.reason,
+                                targetPid,
+                                evidence.peakRisk
+                            );
+
+                            enforcement =
+                                Mjolnir::EnforcementOfficer::MaybeTerminateTarget(
+                                    targetPid,
+                                    evidence.peakRisk,
+                                    settings.enforceRiskThreshold,
+                                    settings.observeOnly
+                                );
+                        }
+                    } else {
+                        enforcement =
+                            Mjolnir::EnforcementOfficer::MaybeTerminateTarget(
+                                targetPid,
+                                report.highestRisk,
+                                settings.enforceRiskThreshold,
+                                settings.observeOnly
+                            );
+                    }
 
                     if (
                         settings.enforceTerminateWatchedTools
@@ -398,6 +498,7 @@ int main(int argc, char** argv) {
                     if (enforcement.succeeded) {
                         targetPid = 0;
                         engine.ResetSessionState();
+                        evidenceWindow.Reset();
                     }
                 }
 
@@ -418,6 +519,12 @@ int main(int argc, char** argv) {
                             " HighestRisk=" +
                             std::to_string(
                                 report.highestRisk
+                            ) +
+                            " EvidencePeak=" +
+                            std::to_string(evidence.peakRisk) +
+                            " EvidenceAvg=" +
+                            std::to_string(
+                                evidence.averageRisk
                             ) +
                             " ObserveOnly=" +
                             std::string(
