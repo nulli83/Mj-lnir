@@ -79,7 +79,39 @@ Point the player agent at this host:
 
 ```bat
 set MJOLNIR_SERVER_URL=http://your-server:8787
-set MJOLNIR_INGEST_KEY=ingest-secret
+set MJOLNIR_INGEST_API_KEY=ingest-secret
 set MJOLNIR_GAME_ID=my-game
 set MJOLNIR_PLAYER_ID=user-42
+```
+
+## Linux local service (systemd --user)
+
+On your Linux machine, install so the server starts at login and optionally auto-updates from `main`:
+
+```bash
+git clone https://github.com/nulli83/Mj-lnir.git
+cd Mj-lnir
+./scripts/install-linux-service.sh
+```
+
+This installs:
+
+* `~/.config/systemd/user/mjolnir-update.service` — `git pull` + `cargo build --release` on login
+* `~/.config/systemd/user/mjolnir-server.service` — runs `mjolnir_server`
+* `~/.config/mjolnir/server.env` — edit API keys here
+* binary at `~/.local/share/mjolnir/bin/mjolnir_server`
+
+Useful commands:
+
+```bash
+curl http://127.0.0.1:8787/health
+systemctl --user status mjolnir-server.service
+journalctl --user -u mjolnir-server.service -f
+~/.local/share/mjolnir/bin/mjolnir-update.sh
+```
+
+Server only (no auto-update on login):
+
+```bash
+./scripts/install-linux-service.sh --no-auto-update
 ```

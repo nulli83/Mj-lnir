@@ -1,0 +1,13 @@
+[Unit]
+Description=Update Mjölnir repo and rebuild server on login
+After=network-online.target
+Wants=network-online.target
+Before=mjolnir-server.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/mjolnir/bin/mjolnir-update.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target

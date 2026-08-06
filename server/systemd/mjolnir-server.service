@@ -1,0 +1,20 @@
+[Unit]
+Description=Mjölnir self-hosted control plane
+After=network-online.target mjolnir-update.service
+Wants=network-online.target
+Wants=mjolnir-update.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/mjolnir/server
+EnvironmentFile=-%h/.config/mjolnir/server.env
+ExecStart=%h/.local/share/mjolnir/bin/mjolnir_server
+Restart=on-failure
+RestartSec=3
+# Sensible defaults if server.env is missing
+Environment=MJOLNIR_BIND=127.0.0.1:8787
+Environment=MJOLNIR_DATA_DIR=%h/.local/share/mjolnir/data
+Environment=MJOLNIR_ENV=development
+
+[Install]
+WantedBy=default.target
