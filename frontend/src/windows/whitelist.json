@@ -13,6 +13,9 @@
     "enable_memory_region_scan": true,
     "enable_hook_scan": true,
     "enable_timing_scan": true,
+    "enable_inline_hook_scan": true,
+    "enable_manual_map_scan": true,
+    "enable_device_scan": true,
     "enforce_risk_threshold": 80
   },
   "target": {
@@ -457,6 +460,9 @@
     "trusted_publisher": -25,
     "trusted_hash": -50,
     "api_hook": 45,
-    "timing_anomaly": 35
+    "timing_anomaly": 35,
+    "inline_hook": 50,
+    "manual_map": 55,
+    "risky_device": 70
   }
 }

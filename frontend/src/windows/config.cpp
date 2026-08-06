@@ -457,6 +457,29 @@ namespace Mjolnir {
                         candidate.settings.enableTimingScan
                     );
 
+                candidate.settings.enableInlineHookScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_inline_hook_scan",
+                        candidate.settings
+                            .enableInlineHookScan
+                    );
+
+                candidate.settings.enableManualMapScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_manual_map_scan",
+                        candidate.settings
+                            .enableManualMapScan
+                    );
+
+                candidate.settings.enableDeviceScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_device_scan",
+                        candidate.settings.enableDeviceScan
+                    );
+
                 candidate.settings.enforceRiskThreshold =
                     ReadInteger(
                         settingsObject,
@@ -647,6 +670,27 @@ namespace Mjolnir {
                         "timing_anomaly",
                         candidate.riskWeights
                             .timingAnomaly
+                    );
+
+                candidate.riskWeights.inlineHook =
+                    ReadInteger(
+                        riskObject,
+                        "inline_hook",
+                        candidate.riskWeights.inlineHook
+                    );
+
+                candidate.riskWeights.manualMap =
+                    ReadInteger(
+                        riskObject,
+                        "manual_map",
+                        candidate.riskWeights.manualMap
+                    );
+
+                candidate.riskWeights.riskyDevice =
+                    ReadInteger(
+                        riskObject,
+                        "risky_device",
+                        candidate.riskWeights.riskyDevice
                     );
             }
 
@@ -1580,7 +1624,10 @@ namespace Mjolnir {
             ) ||
             !validRiskWeight(weights.trustedHash) ||
             !validRiskWeight(weights.apiHook) ||
-            !validRiskWeight(weights.timingAnomaly)
+            !validRiskWeight(weights.timingAnomaly) ||
+            !validRiskWeight(weights.inlineHook) ||
+            !validRiskWeight(weights.manualMap) ||
+            !validRiskWeight(weights.riskyDevice)
         ) {
             errorMessage =
                 "Every risk weight must be between "

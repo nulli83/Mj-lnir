@@ -60,6 +60,21 @@ namespace Mjolnir {
         bool enableTimingScan = true;
 
         /*
+         * När true kontrolleras funktionsprologues för inline hooks.
+         */
+        bool enableInlineHookScan = true;
+
+        /*
+         * När true letas PE-headers i privat executable minne.
+         */
+        bool enableManualMapScan = true;
+
+        /*
+         * När true skannas kända sårbara/cheat-relaterade devices.
+         */
+        bool enableDeviceScan = true;
+
+        /*
          * Risktröskel för enforce när observeOnly=false.
          */
         int enforceRiskThreshold = 80;
@@ -85,6 +100,9 @@ namespace Mjolnir {
         int trustedHash = -50;
         int apiHook = 45;
         int timingAnomaly = 35;
+        int inlineHook = 50;
+        int manualMap = 55;
+        int riskyDevice = 70;
     };
 
     struct ConfigSnapshot {

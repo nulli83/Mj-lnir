@@ -217,6 +217,101 @@ namespace Mjolnir {
             return processIds.front();
         }
 
+        static DWORD GetProcessIdByWindowTitle(
+            const std::wstring& windowTitle
+        ) {
+            if (windowTitle.empty()) {
+                return 0;
+            }
+
+            struct SearchContext {
+                const std::wstring* title = nullptr;
+                DWORD processId = 0;
+            };
+
+            SearchContext context{};
+            context.title = &windowTitle;
+
+            EnumWindows(
+                [](HWND hwnd, LPARAM lParam) -> BOOL {
+                    auto* search =
+                        reinterpret_cast<SearchContext*>(lParam);
+
+                    if (!search || !search->title) {
+                        return FALSE;
+                    }
+
+                    if (!IsWindowVisible(hwnd)) {
+                        return TRUE;
+                    }
+
+                    wchar_t title[512]{};
+                    const int length = GetWindowTextW(
+                        hwnd,
+                        title,
+                        512
+                    );
+
+                    if (length <= 0) {
+                        return TRUE;
+                    }
+
+                    if (
+                        _wcsicmp(
+                            title,
+                            search->title->c_str()
+                        ) != 0
+                    ) {
+                        const std::wstring haystack(title);
+                        const std::wstring& needle =
+                            *search->title;
+
+                        bool found = false;
+
+                        if (
+                            haystack.size() >= needle.size() &&
+                            !needle.empty()
+                        ) {
+                            for (
+                                std::size_t index = 0;
+                                index + needle.size() <=
+                                    haystack.size();
+                                ++index
+                            ) {
+                                if (
+                                    _wcsnicmp(
+                                        haystack.c_str() + index,
+                                        needle.c_str(),
+                                        needle.size()
+                                    ) == 0
+                                ) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!found) {
+                            return TRUE;
+                        }
+                    }
+
+                    DWORD pid = 0;
+                    GetWindowThreadProcessId(hwnd, &pid);
+
+                    if (pid != 0) {
+                        search->processId = pid;
+                        return FALSE;
+                    }
+
+                    return TRUE;
+                },
+                reinterpret_cast<LPARAM>(&context)
+            );
+
+            return context.processId;
+        }
+
         static HANDLE OpenTargetProcess(
             DWORD pid,
             DWORD desiredAccess =

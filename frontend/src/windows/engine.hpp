@@ -7,9 +7,12 @@
 #include "alert.hpp"
 #include "config.hpp"
 #include "debugger.hpp"
+#include "devices.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
+#include "inline_hooks.hpp"
 #include "integrity.hpp"
+#include "manual_map.hpp"
 #include "memory.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
@@ -44,7 +47,10 @@ namespace Mjolnir {
         Thread,
         Process,
         Hook,
-        Timing
+        Timing,
+        InlineHook,
+        ManualMap,
+        Device
     };
 
     struct SecurityFinding {
@@ -150,6 +156,12 @@ namespace Mjolnir {
                     return "HOOK";
                 case FindingCategory::Timing:
                     return "TIMING";
+                case FindingCategory::InlineHook:
+                    return "INLINE_HOOK";
+                case FindingCategory::ManualMap:
+                    return "MANUAL_MAP";
+                case FindingCategory::Device:
+                    return "DEVICE";
                 default:
                     return "UNKNOWN";
             }
@@ -838,6 +850,147 @@ namespace Mjolnir {
             );
         }
 
+        void ScanInlineHooks(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const InlineHookScanResult scan =
+                InlineHookDetector::ScanCriticalPrologues(
+                    processHandle,
+                    targetPid,
+                    snapshot.riskWeights.inlineHook
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const InlineHookFinding& hook : scan.hooks) {
+                std::ostringstream details;
+                details
+                    << "Function=" << hook.moduleName
+                    << "!" << hook.functionName
+                    << " Addr=0x" << std::hex
+                    << hook.remoteAddress << std::dec
+                    << " Prologue=" << hook.prologueHex
+                    << " Reasons="
+                    << JoinReasons(hook.reasons);
+
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::InlineHook,
+                        ThreatLevel::LOW,
+                        "Critical API prologue looks inline-hooked",
+                        details.str(),
+                        targetPid,
+                        hook.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanManualMaps(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const ManualMapScanResult scan =
+                ManualMapDetector::ScanPrivateImages(
+                    processHandle,
+                    snapshot.riskWeights.manualMap
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            constexpr std::size_t maxReports = 6;
+            std::size_t reported = 0;
+
+            for (const ManualMapFinding& finding : scan.findings) {
+                if (reported >= maxReports) {
+                    break;
+                }
+
+                std::ostringstream details;
+                details
+                    << "Base=0x" << std::hex
+                    << finding.baseAddress << std::dec
+                    << " Size=" << finding.regionSize
+                    << " Machine=0x" << std::hex
+                    << finding.machine << std::dec
+                    << " Reasons="
+                    << JoinReasons(finding.reasons);
+
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::ManualMap,
+                        ThreatLevel::LOW,
+                        "Private PE image looks manually mapped",
+                        details.str(),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+
+                ++reported;
+            }
+        }
+
+        void ScanDevices(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            const DeviceScanResult scan =
+                DeviceScanner::ScanKnownThreats(
+                    snapshot.riskWeights.riskyDevice,
+                    snapshot.riskWeights.riskyDevice
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const DeviceFinding& device : scan.devices) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Device,
+                        ThreatLevel::LOW,
+                        "Risky kernel device interface detected",
+                        "Device='" + device.devicePath +
+                            "' Label='" + device.label +
+                            "' Reasons=" +
+                            JoinReasons(device.reasons),
+                        0,
+                        device.riskScore
+                    }
+                );
+            }
+
+            for (const DriverFinding& driver : scan.drivers) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Device,
+                        ThreatLevel::LOW,
+                        "Risky kernel driver image is loaded",
+                        "Driver='" + driver.baseName +
+                            "' Path='" + driver.imagePath +
+                            "' Reasons=" +
+                            JoinReasons(driver.reasons),
+                        0,
+                        driver.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -901,6 +1054,30 @@ namespace Mjolnir {
                 );
             }
 
+            if (
+                snapshot.settings.enableInlineHookScan &&
+                (cycleCounter_ % 4 == 1)
+            ) {
+                ScanInlineHooks(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableManualMapScan &&
+                (cycleCounter_ % 4 == 2)
+            ) {
+                ScanManualMaps(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
             /*
              * Dyra skanningar körs mer sällan.
              */
@@ -924,6 +1101,13 @@ namespace Mjolnir {
 
             if (cycleCounter_ % 2 == 1) {
                 ScanWatchedProcesses(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableDeviceScan &&
+                (cycleCounter_ % 10 == 3)
+            ) {
+                ScanDevices(snapshot, report);
             }
 
             if (

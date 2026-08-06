@@ -34,11 +34,16 @@ game.exe  <--- audited by ---  mjolnir_core.exe (C++)
 | Thread scanner | Threads whose start address is outside modules |
 | Provenance checks | Unexpected parent process / install path |
 | Hook scanner (IAT) | Critical API imports redirected outside exporter / into private RX |
+| Inline hook scanner | JMP/trampoline patches on critical API prologues |
+| Manual-map scanner | PE headers inside private executable memory |
+| Device/driver scanner | Known vulnerable/cheat kernel devices and drivers |
 | Timing anomaly | QPC vs tick divergence suggesting single-stepping |
 | Process watchlist | Cheat Engine, x64dbg, IDA, remote-access tools |
 
 Default mode is **observe-only** (`settings.observe_only = true` in `whitelist.json`).
 Set `observe_only` to `false` to enable enforcement: if `highest_risk >= enforce_risk_threshold`, the target process is terminated.
+
+Target acquisition uses `target.process_name` and optional `target.window_title`.
 
 ## Project Layout
 
