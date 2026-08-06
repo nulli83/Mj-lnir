@@ -8,7 +8,9 @@
     "max_alerts_per_minute": 60,
     "require_valid_signature": false,
     "allow_unknown_microsoft_modules": true,
-    "observe_only": true
+    "observe_only": true,
+    "enable_handle_scan": true,
+    "enable_memory_region_scan": true
   },
   "target": {
     "process_name": "game.exe",
@@ -381,6 +383,7 @@
   ],
   "whitelisted_signatures": [],
   "trusted_hashes": [],
+  "known_bad_hashes": [],
   "monitor_only_processes": [
     "powershell.exe",
     "pwsh.exe",

@@ -427,6 +427,21 @@ namespace Mjolnir {
                         "observe_only",
                         candidate.settings.observeOnly
                     );
+
+                candidate.settings.enableHandleScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_handle_scan",
+                        candidate.settings.enableHandleScan
+                    );
+
+                candidate.settings.enableMemoryRegionScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_memory_region_scan",
+                        candidate.settings
+                            .enableMemoryRegionScan
+                    );
             }
 
             /*
@@ -673,37 +688,60 @@ namespace Mjolnir {
             );
 
             /*
-             * SHA-256-lista
+             * SHA-256-listor
              */
-            if (const auto hashesIterator =
-                    root.find("trusted_hashes");
-                hashesIterator != root.end()) {
+            const auto readHashSet =
+                [](
+                    const Json& rootObject,
+                    const char* key,
+                    std::unordered_set<std::string>& destination
+                ) {
+                    const auto iterator = rootObject.find(key);
 
-                if (!hashesIterator->is_array()) {
-                    throw std::runtime_error(
-                        "'trusted_hashes' must be an array."
-                    );
-                }
+                    if (iterator == rootObject.end()) {
+                        return;
+                    }
 
-                for (const Json& item : *hashesIterator) {
-                    if (!item.is_string()) {
+                    if (!iterator->is_array()) {
                         throw std::runtime_error(
-                            "Every trusted hash must "
-                            "be a string."
+                            std::string("'") + key +
+                            "' must be an array."
                         );
                     }
 
-                    std::string hash = NormalizeHash(
-                        item.get<std::string>()
-                    );
+                    for (const Json& item : *iterator) {
+                        if (!item.is_string()) {
+                            throw std::runtime_error(
+                                std::string(
+                                    "Every item in '"
+                                ) + key +
+                                "' must be a string."
+                            );
+                        }
 
-                    if (!hash.empty()) {
-                        candidate.trustedHashes.insert(
-                            std::move(hash)
+                        std::string hash = NormalizeHash(
+                            item.get<std::string>()
                         );
+
+                        if (!hash.empty()) {
+                            destination.insert(
+                                std::move(hash)
+                            );
+                        }
                     }
-                }
-            }
+                };
+
+            readHashSet(
+                root,
+                "trusted_hashes",
+                candidate.trustedHashes
+            );
+
+            readHashSet(
+                root,
+                "known_bad_hashes",
+                candidate.knownBadHashes
+            );
 
             /*
              * Misstänkta modulkataloger
@@ -1072,6 +1110,24 @@ namespace Mjolnir {
                    .find(normalized) !=
                snapshot_
                    .trustedHashes
+                   .end();
+    }
+
+    bool ConfigManager::IsHashKnownBad(
+        std::string_view sha256
+    ) const {
+        const std::string normalized =
+            NormalizeHash(sha256);
+
+        std::shared_lock<std::shared_mutex> lock(
+            mutex_
+        );
+
+        return snapshot_
+                   .knownBadHashes
+                   .find(normalized) !=
+               snapshot_
+                   .knownBadHashes
                    .end();
     }
 

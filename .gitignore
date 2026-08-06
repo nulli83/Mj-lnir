@@ -39,3 +39,13 @@
 
 # debug information files
 *.dwo
+
+# Build / IDE
+build/
+cmake-build-*/
+.vs/
+.vscode/
+target/
+log/*.jsonl
+log/*.jsonl.*
+!frontend/src/windows/log/sample.log

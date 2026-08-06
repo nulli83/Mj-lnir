@@ -1,108 +1,250 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <windows.h>
+
+#include <atomic>
+#include <chrono>
+#include <csignal>
 #include <iostream>
 #include <string>
 #include <thread>
-#include <chrono>
-#include <windows.h>
-#include "memory.hpp"
-#include "config.hpp"
-#include "modules.hpp"
-#include "overlay.hpp"
+
 #include "alert.hpp"
+#include "config.hpp"
+#include "debugger.hpp"
+#include "engine.hpp"
+#include "ipc.hpp"
+#include "memory.hpp"
 
-const std::wstring TARGET_PROCESS = L"game.exe";
+namespace {
 
-void PrintBanner() {
-    Mjolnir::SecurityAlertSystem::DispatchAlert(
-        Mjolnir::ThreatLevel::LOW, 
-        "DAEMON", 
-        "[Mjölnir v1.0.0-alpha] - Security Core Initialized & Armed."
-    );
-    Mjolnir::SecurityAlertSystem::DispatchAlert(
-        Mjolnir::ThreatLevel::LOW, 
-        "DAEMON", 
-        "[+] Active Vectors: Process Handle, DLL Whitelist, Overlay Analysis [ACTIVE]"
-    );
-    std::cout << "------------------------------------------------------------\n";
-}
+    std::atomic<bool> g_running{true};
+
+    void HandleSignal(int) {
+        g_running = false;
+    }
+
+    std::wstring Utf8ToWide(const std::string& value) {
+        if (value.empty()) {
+            return {};
+        }
+
+        const int requiredSize = MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            value.c_str(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0
+        );
+
+        if (requiredSize <= 0) {
+            return {};
+        }
+
+        std::wstring wide(
+            static_cast<std::size_t>(requiredSize),
+            L'\0'
+        );
+
+        MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            value.c_str(),
+            static_cast<int>(value.size()),
+            wide.data(),
+            requiredSize
+        );
+
+        return wide;
+    }
+
+} // namespace
 
 int main() {
-    PrintBanner();
+    std::signal(SIGINT, HandleSignal);
+    std::signal(SIGTERM, HandleSignal);
 
-    DWORD targetPid = 0;
-    Mjolnir::ConfigManager config;
-    
-    // Load whitelist configuration
-    if (config.LoadConfig("whitelist.json")) {
+    Mjolnir::ConfigManager config("whitelist.json");
+    Mjolnir::IpcClient ipcClient;
+    Mjolnir::SecurityEngine engine(config);
+
+    Mjolnir::AlertSettings alertSettings{};
+    alertSettings.logPath = "log/mjolnir.jsonl";
+    alertSettings.consoleOutput = true;
+    alertSettings.fileOutput = true;
+    alertSettings.jsonLines = true;
+    alertSettings.duplicateCooldownMs = 30000;
+    Mjolnir::SecurityAlertSystem::Configure(alertSettings);
+
+    Mjolnir::SecurityAlertSystem::SetExternalSink(
+        [&ipcClient](const Mjolnir::SecurityAlert& alert) {
+            ipcClient.SendJsonAlert(
+                Mjolnir::SecurityAlertSystem::ThreatLevelToString(
+                    alert.level
+                ),
+                alert.category,
+                alert.details,
+                alert.processId,
+                alert.riskScore
+            );
+        }
+    );
+
+    Mjolnir::SecurityAlertSystem::DispatchAlert(
+        Mjolnir::ThreatLevel::LOW,
+        "DAEMON",
+        "[Mjölnir v1.1.0] Security core armed. "
+        "Vectors: modules, overlays, handles, debugger, "
+        "integrity, memory-regions, process-watch."
+    );
+
+    const auto loadResult =
+        config.LoadConfigDetailed("whitelist.json");
+
+    if (loadResult) {
         Mjolnir::SecurityAlertSystem::DispatchAlert(
-            Mjolnir::ThreatLevel::LOW, 
-            "CONFIG", 
-            "Successfully parsed whitelist.json exception rules."
+            Mjolnir::ThreatLevel::LOW,
+            "CONFIG",
+            "Loaded whitelist.json successfully."
+        );
+
+        const auto settings = config.GetSettings();
+        alertSettings.duplicateCooldownMs =
+            settings.alertCooldownMs;
+        Mjolnir::SecurityAlertSystem::Configure(
+            alertSettings
         );
     } else {
         Mjolnir::SecurityAlertSystem::DispatchAlert(
-            Mjolnir::ThreatLevel::MEDIUM, 
-            "CONFIG", 
-            "Failed to load whitelist.json. Operating under restrictive default rules."
+            Mjolnir::ThreatLevel::MEDIUM,
+            "CONFIG",
+            "Failed to load whitelist.json: " +
+                loadResult.errorMessage +
+                ". Operating with restrictive defaults."
         );
     }
 
-    while (true) {
+    const auto selfDebug =
+        Mjolnir::DebuggerDetector::InspectCurrentProcess();
+
+    if (selfDebug.attached) {
+        Mjolnir::SecurityAlertSystem::DispatchAlert(
+            Mjolnir::ThreatLevel::HIGH,
+            "DEBUGGER",
+            "Security core itself appears to be debugged.",
+            GetCurrentProcessId(),
+            selfDebug.riskScore
+        );
+    }
+
+    DWORD targetPid = 0;
+    std::uint64_t cycle = 0;
+
+    while (g_running) {
+        if (config.ReloadIfChanged()) {
+            Mjolnir::SecurityAlertSystem::DispatchAlert(
+                Mjolnir::ThreatLevel::LOW,
+                "CONFIG",
+                "Configuration reloaded from disk."
+            );
+        }
+
+        const auto settings = config.GetSettings();
+        const auto target = config.GetTarget();
+        const std::wstring targetName =
+            Utf8ToWide(target.processName);
+
         if (targetPid == 0) {
-            targetPid = Mjolnir::MemoryManager::GetProcessIdByName(TARGET_PROCESS);
+            targetPid =
+                Mjolnir::MemoryManager::GetProcessIdByName(
+                    targetName
+                );
+
             if (targetPid != 0) {
                 Mjolnir::SecurityAlertSystem::DispatchAlert(
-                    Mjolnir::ThreatLevel::LOW, 
-                    "MONITOR", 
-                    "Target application acquired. Tracking PID: " + std::to_string(targetPid)
+                    Mjolnir::ThreatLevel::LOW,
+                    "MONITOR",
+                    "Target acquired: " +
+                        target.processName +
+                        " (PID " +
+                        std::to_string(targetPid) +
+                        ")",
+                    targetPid
                 );
             }
         } else {
-            // Open handle with query and read permissions
-            HANDLE hProcess = Mjolnir::MemoryManager::OpenTargetProcess(
-                targetPid, 
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
-            );
-            
-            if (!hProcess) {
-                Mjolnir::SecurityAlertSystem::DispatchAlert(
-                    Mjolnir::ThreatLevel::MEDIUM, 
-                    "MONITOR", 
-                    "Lost connection to target process. Resetting tracking state."
+            HANDLE probe =
+                Mjolnir::MemoryManager::OpenTargetProcess(
+                    targetPid,
+                    PROCESS_QUERY_LIMITED_INFORMATION
                 );
+
+            if (
+                probe == nullptr ||
+                !Mjolnir::MemoryManager::IsProcessAlive(probe)
+            ) {
+                Mjolnir::SecurityAlertSystem::DispatchAlert(
+                    Mjolnir::ThreatLevel::MEDIUM,
+                    "MONITOR",
+                    "Lost target process. Waiting for relaunch.",
+                    targetPid
+                );
+
                 targetPid = 0;
+
+                if (probe != nullptr) {
+                    CloseHandle(probe);
+                }
             } else {
-                // 1. Audit Loaded Modules (DLL Injection Check)
-                auto modules = Mjolnir::ModuleScanner::GetLoadedModules(targetPid);
-                for (const auto& mod : modules) {
-                    // Example check against whitelist logic
-                    if (!config.IsWhitelisted(mod)) {
-                        // Log or handle unwhitelisted module injection attempt
-                    }
-                }
+                CloseHandle(probe);
 
-                // 2. Audit Suspicious Click-Through Overlays
-                auto suspiciousOverlays = Mjolnir::OverlayDetector::DetectSuspiciousOverlays();
-                for (const auto& overlay : suspiciousOverlays) {
-                    // Filter out system windows, only flag third-party overlays targeting user space
-                    if (overlay.processId != targetPid && overlay.processId != GetCurrentProcessId()) {
-                        std::string alertMsg = "Suspicious overlay detected | Title: '" + overlay.title + 
-                                               "' | Class: " + overlay.className + 
-                                               " | PID: " + std::to_string(overlay.processId);
-                        
-                        Mjolnir::SecurityAlertSystem::DispatchAlert(
-                            Mjolnir::ThreatLevel::HIGH, 
-                            "OVERLAY", 
-                            alertMsg
-                        );
-                    }
-                }
+                const auto report =
+                    engine.RunCycle(targetPid);
 
-                CloseHandle(hProcess);
+                ++cycle;
+
+                if (cycle % 20 == 0) {
+                    Mjolnir::SecurityAlertSystem::DispatchAlert(
+                        Mjolnir::ThreatLevel::LOW,
+                        "HEARTBEAT",
+                        "Scan cycle " +
+                            std::to_string(cycle) +
+                            " complete. Findings this cycle: " +
+                            std::to_string(report.findings) +
+                            ". Highest risk: " +
+                            std::to_string(
+                                report.highestRisk
+                            ) +
+                            ". Observe-only=" +
+                            std::string(
+                                settings.observeOnly
+                                    ? "true"
+                                    : "false"
+                            ),
+                        targetPid
+                    );
+                }
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+        const auto interval = std::chrono::milliseconds(
+            settings.scanIntervalMs == 0
+                ? 3000
+                : settings.scanIntervalMs
+        );
+
+        std::this_thread::sleep_for(interval);
     }
 
+    Mjolnir::SecurityAlertSystem::DispatchAlert(
+        Mjolnir::ThreatLevel::LOW,
+        "DAEMON",
+        "Security core shutting down cleanly."
+    );
+
+    Mjolnir::SecurityAlertSystem::ClearExternalSink();
     return 0;
 }
