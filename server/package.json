@@ -1,0 +1,19 @@
+{
+  "name": "mjolnir-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mjölnir control-plane API for game studios (Cloudflare Workers)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "wrangler check",
+    "types": "wrangler types",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260804.1",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.119.0"
+  }
+}
