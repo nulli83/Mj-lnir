@@ -548,6 +548,81 @@ namespace Mjolnir {
                         candidate.settings.enableSelfProtect
                     );
 
+                candidate.settings.enableInjectionHeuristics =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_injection_heuristics",
+                        candidate.settings
+                            .enableInjectionHeuristics
+                    );
+
+                candidate.settings.enableEvidenceWindow =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_evidence_window",
+                        candidate.settings.enableEvidenceWindow
+                    );
+
+                candidate.settings.evidenceWindowMs =
+                    ReadUnsigned32(
+                        settingsObject,
+                        "evidence_window_ms",
+                        candidate.settings.evidenceWindowMs
+                    );
+
+                candidate.settings.evidenceMinSamples =
+                    ReadUnsigned32(
+                        settingsObject,
+                        "evidence_min_samples",
+                        candidate.settings.evidenceMinSamples
+                    );
+
+                candidate.settings.evidenceMinAverageRisk =
+                    ReadInteger(
+                        settingsObject,
+                        "evidence_min_average_risk",
+                        candidate.settings
+                            .evidenceMinAverageRisk
+                    );
+
+                candidate.settings.evidenceMinPeakRisk =
+                    ReadInteger(
+                        settingsObject,
+                        "evidence_min_peak_risk",
+                        candidate.settings.evidenceMinPeakRisk
+                    );
+
+                candidate.settings.evidenceSustainedHighRisk =
+                    ReadInteger(
+                        settingsObject,
+                        "evidence_sustained_high_risk",
+                        candidate.settings
+                            .evidenceSustainedHighRisk
+                    );
+
+                candidate.settings
+                    .evidenceMinSustainedHighSamples =
+                    ReadUnsigned32(
+                        settingsObject,
+                        "evidence_min_sustained_high_samples",
+                        candidate.settings
+                            .evidenceMinSustainedHighSamples
+                    );
+
+                candidate.settings.evidenceSettleCycles =
+                    ReadUnsigned32(
+                        settingsObject,
+                        "evidence_settle_cycles",
+                        candidate.settings.evidenceSettleCycles
+                    );
+
+                candidate.settings.ipcHmacSecret =
+                    ReadString(
+                        settingsObject,
+                        "ipc_hmac_secret",
+                        candidate.settings.ipcHmacSecret
+                    );
+
                 candidate.settings
                     .enforceTerminateWatchedTools =
                     ReadBoolean(
@@ -832,6 +907,13 @@ namespace Mjolnir {
                         riskObject,
                         "handle_birth",
                         candidate.riskWeights.handleBirth
+                    );
+
+                candidate.riskWeights.injection =
+                    ReadInteger(
+                        riskObject,
+                        "injection",
+                        candidate.riskWeights.injection
                     );
             }
 
@@ -1777,7 +1859,8 @@ namespace Mjolnir {
             !validRiskWeight(weights.selfProtect) ||
             !validRiskWeight(weights.regionBirth) ||
             !validRiskWeight(weights.regionEscalate) ||
-            !validRiskWeight(weights.handleBirth)
+            !validRiskWeight(weights.handleBirth) ||
+            !validRiskWeight(weights.injection)
         ) {
             errorMessage =
                 "Every risk weight must be between "
@@ -1793,6 +1876,43 @@ namespace Mjolnir {
             errorMessage =
                 "enforce_risk_threshold must be between "
                 "1 and 1000.";
+
+            return false;
+        }
+
+        if (
+            snapshot.settings.evidenceWindowMs < 1000 ||
+            snapshot.settings.evidenceWindowMs > 600000
+        ) {
+            errorMessage =
+                "evidence_window_ms must be between "
+                "1000 and 600000.";
+
+            return false;
+        }
+
+        if (
+            snapshot.settings.evidenceMinSamples < 1 ||
+            snapshot.settings.evidenceMinSamples > 1000
+        ) {
+            errorMessage =
+                "evidence_min_samples must be between "
+                "1 and 1000.";
+
+            return false;
+        }
+
+        if (
+            snapshot.settings.evidenceMinAverageRisk < 0 ||
+            snapshot.settings.evidenceMinAverageRisk > 1000 ||
+            snapshot.settings.evidenceMinPeakRisk < 0 ||
+            snapshot.settings.evidenceMinPeakRisk > 1000 ||
+            snapshot.settings.evidenceSustainedHighRisk < 0 ||
+            snapshot.settings.evidenceSustainedHighRisk > 1000
+        ) {
+            errorMessage =
+                "Evidence risk thresholds must be between "
+                "0 and 1000.";
 
             return false;
         }

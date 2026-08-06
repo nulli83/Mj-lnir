@@ -120,6 +120,31 @@ namespace Mjolnir {
         bool enableSelfProtect = true;
 
         /*
+         * När true körs inject-heuristik på module birth.
+         */
+        bool enableInjectionHeuristics = true;
+
+        /*
+         * När true kräver enforce ett glidande evidence-fönster
+         * (inte bara en enskild cykel-peak).
+         */
+        bool enableEvidenceWindow = true;
+
+        std::uint32_t evidenceWindowMs = 45000;
+        std::uint32_t evidenceMinSamples = 3;
+        int evidenceMinAverageRisk = 55;
+        int evidenceMinPeakRisk = 80;
+        int evidenceSustainedHighRisk = 50;
+        std::uint32_t evidenceMinSustainedHighSamples = 3;
+        std::uint32_t evidenceSettleCycles = 5;
+
+        /*
+         * Valfri HMAC-hemlighet för IPC-frames.
+         * MJOLNIR_IPC_SECRET i miljön har företräde.
+         */
+        std::string ipcHmacSecret;
+
+        /*
          * När enforce är aktivt, terminera även kända cheat-verktyg.
          */
         bool enforceTerminateWatchedTools = true;
@@ -162,6 +187,7 @@ namespace Mjolnir {
         int regionBirth = 45;
         int regionEscalate = 55;
         int handleBirth = 40;
+        int injection = 50;
     };
 
     struct ConfigSnapshot {
