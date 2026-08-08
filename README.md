@@ -85,6 +85,12 @@ cargo run --release
 
 Defaults to `http://0.0.0.0:8787`. Set `MJOLNIR_INGEST_API_KEY` and `MJOLNIR_STUDIO_API_KEY` before production.
 
+On a local Linux desktop, install as a user service (starts on login, optional auto-update):
+
+```bash
+./scripts/install-linux-service.sh
+```
+
 See `client/README.md` and `server/README.md` for auth and policy details.
 
 ## Trust model (important)
