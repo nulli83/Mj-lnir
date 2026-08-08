@@ -577,6 +577,34 @@ namespace Mjolnir {
                         candidate.settings.enablePipeScan
                     );
 
+                candidate.settings.enableSyscallStubScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_syscall_stub_scan",
+                        candidate.settings.enableSyscallStubScan
+                    );
+
+                candidate.settings.enableHollowingScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_hollowing_scan",
+                        candidate.settings.enableHollowingScan
+                    );
+
+                candidate.settings.enableMitigationScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_mitigation_scan",
+                        candidate.settings.enableMitigationScan
+                    );
+
+                candidate.settings.enableStealthScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_stealth_scan",
+                        candidate.settings.enableStealthScan
+                    );
+
                 candidate.settings.enableEvidenceWindow =
                     ReadBoolean(
                         settingsObject,
@@ -956,6 +984,34 @@ namespace Mjolnir {
                         riskObject,
                         "suspicious_pipe",
                         candidate.riskWeights.suspiciousPipe
+                    );
+
+                candidate.riskWeights.syscallStub =
+                    ReadInteger(
+                        riskObject,
+                        "syscall_stub",
+                        candidate.riskWeights.syscallStub
+                    );
+
+                candidate.riskWeights.hollowing =
+                    ReadInteger(
+                        riskObject,
+                        "hollowing",
+                        candidate.riskWeights.hollowing
+                    );
+
+                candidate.riskWeights.mitigation =
+                    ReadInteger(
+                        riskObject,
+                        "mitigation",
+                        candidate.riskWeights.mitigation
+                    );
+
+                candidate.riskWeights.stealth =
+                    ReadInteger(
+                        riskObject,
+                        "stealth",
+                        candidate.riskWeights.stealth
                     );
             }
 
@@ -1905,7 +1961,11 @@ namespace Mjolnir {
             !validRiskWeight(weights.injection) ||
             !validRiskWeight(weights.dangerousPrivilege) ||
             !validRiskWeight(weights.eatHook) ||
-            !validRiskWeight(weights.suspiciousPipe)
+            !validRiskWeight(weights.suspiciousPipe) ||
+            !validRiskWeight(weights.syscallStub) ||
+            !validRiskWeight(weights.hollowing) ||
+            !validRiskWeight(weights.mitigation) ||
+            !validRiskWeight(weights.stealth)
         ) {
             errorMessage =
                 "Every risk weight must be between "

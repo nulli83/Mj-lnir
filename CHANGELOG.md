@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Linux `systemd --user` install + login auto-update scripts (PR #6, if not yet merged)
 
+## [1.11.0] - 2026-08-08
+
+### Added
+
+- **Syscall stub scanner** — critical ntdll Nt* prologues remote vs local (JMP/trampoline / missing syscall pattern)
+- **Hollowing scanner** — MEM_PRIVATE primary image, private entry point, PEB ImagePathName vs OS path
+- **Mitigation scanner** — DEP/ASLR/CFG weakened, dynamic-code remote downgrade
+- **Stealth scanner** — ProcessInstrumentationCallback + ThreadHideFromDebugger
+- Server `POST /v1/challenges/:session_id` — studio-issued live challenge nonce
+- Server treats `SYSCALL_STUB`, `HOLLOWING`, `STEALTH` as critical categories
+
+### Config
+
+- `enable_syscall_stub_scan`, `enable_hollowing_scan`, `enable_mitigation_scan`, `enable_stealth_scan`
+- Weights: `syscall_stub`, `hollowing`, `mitigation`, `stealth`
+
 ## [1.10.0] - 2026-08-08
 
 ### Added

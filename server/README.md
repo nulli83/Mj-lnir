@@ -22,6 +22,7 @@ Detection stays on the client. This server only decides.
 | `GET` | `/health` | none | ops |
 | `POST` | `/v1/sessions` | ingest | client agent |
 | `POST` | `/v1/ingest` | ingest | client agent |
+| `POST` | `/v1/challenges/:session_id` | studio | game backend (live nonce) |
 | `GET` | `/v1/decisions/:session_id` | studio | game backend |
 | `GET` | `/v1/policy/:game_id` | studio | studio tools |
 | `PUT` | `/v1/policy/:game_id` | studio | studio tools |
