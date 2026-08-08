@@ -10,6 +10,7 @@
 #include "config.hpp"
 #include "debugger.hpp"
 #include "devices.hpp"
+#include "eat_hooks.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
 #include "image_integrity.hpp"
@@ -21,6 +22,8 @@
 #include "memory.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
+#include "pipes.hpp"
+#include "privileges.hpp"
 #include "process.hpp"
 #include "regions.hpp"
 #include "services.hpp"
@@ -63,7 +66,10 @@ namespace Mjolnir {
         Baseline,
         SelfProtect,
         Lifetime,
-        Injection
+        Injection,
+        Privilege,
+        EatHook,
+        Pipe
     };
 
     struct SecurityFinding {
@@ -192,6 +198,12 @@ namespace Mjolnir {
                     return "LIFETIME";
                 case FindingCategory::Injection:
                     return "INJECTION";
+                case FindingCategory::Privilege:
+                    return "PRIVILEGE";
+                case FindingCategory::EatHook:
+                    return "EAT_HOOK";
+                case FindingCategory::Pipe:
+                    return "PIPE";
                 default:
                     return "UNKNOWN";
             }
@@ -1416,6 +1428,113 @@ namespace Mjolnir {
             }
         }
 
+        void ScanPrivileges(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enablePrivilegeScan) {
+                return;
+            }
+
+            const PrivilegeScanResult scan =
+                PrivilegeScanner::ScanDangerousPrivileges(
+                    snapshot.whitelistedProcesses,
+                    snapshot.riskWeights.dangerousPrivilege
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const PrivilegeFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Privilege,
+                        ThreatLevel::LOW,
+                        "Process holds a dangerous privilege",
+                        "Process='" + finding.processName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        finding.processId,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanEatHooks(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableEatHookScan) {
+                return;
+            }
+
+            const EatHookScanResult scan =
+                EatHookScanner::ScanCriticalExports(
+                    processHandle,
+                    snapshot.riskWeights.eatHook
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const EatHookFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::EatHook,
+                        ThreatLevel::LOW,
+                        "Critical export table entry looks patched",
+                        "Module='" + finding.moduleName +
+                            "' Function='" + finding.functionName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanPipes(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enablePipeScan) {
+                return;
+            }
+
+            const PipeScanResult scan =
+                PipeScanner::ScanSuspiciousPipes(
+                    snapshot.riskWeights.suspiciousPipe
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const PipeFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Pipe,
+                        ThreatLevel::LOW,
+                        "Suspicious named pipe present on system",
+                        "Pipe='" + finding.pipeName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        0,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -1587,6 +1706,32 @@ namespace Mjolnir {
                 (cycleCounter_ % 5 == 0)
             ) {
                 ScanTiming(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enablePrivilegeScan &&
+                (cycleCounter_ % 6 == 2)
+            ) {
+                ScanPrivileges(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableEatHookScan &&
+                (cycleCounter_ % 5 == 3)
+            ) {
+                ScanEatHooks(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enablePipeScan &&
+                (cycleCounter_ % 4 == 0)
+            ) {
+                ScanPipes(snapshot, report);
             }
 
             CloseHandle(processHandle);

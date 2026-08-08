@@ -48,6 +48,36 @@ pub fn action_rank(action: &DecisionAction) -> u8 {
     }
 }
 
+pub fn apply_known_bad_hash_boost(
+    events: &[FindingEvent],
+    policy: &GamePolicy,
+    peak: i32,
+) -> (i32, Option<String>) {
+    if policy.known_bad_hashes.is_empty() {
+        return (peak, None);
+    }
+
+    for event in events {
+        let haystack = format!(
+            "{} {}",
+            event.details.to_ascii_lowercase(),
+            event.category.to_ascii_lowercase()
+        );
+
+        for hash in &policy.known_bad_hashes {
+            let needle = hash.to_ascii_lowercase();
+            if !needle.is_empty() && haystack.contains(&needle) {
+                return (
+                    peak.max(100),
+                    Some(format!("Matched known_bad_hash prefix/value '{hash}'")),
+                );
+            }
+        }
+    }
+
+    (peak, None)
+}
+
 pub fn decide_action(
     peak: i32,
     average: i32,
@@ -67,7 +97,14 @@ pub fn decide_action(
         .filter(|category| {
             matches!(
                 *category,
-                "INJECTION" | "MANUAL_MAP" | "INLINE_HOOK" | "HOOK" | "IMAGE"
+                "INJECTION"
+                    | "MANUAL_MAP"
+                    | "INLINE_HOOK"
+                    | "HOOK"
+                    | "EAT_HOOK"
+                    | "IMAGE"
+                    | "PRIVILEGE"
+                    | "PIPE"
             )
         })
         .collect();
@@ -118,9 +155,20 @@ pub fn build_decision(
     previous: Option<&DecisionRecord>,
 ) -> DecisionRecord {
     let scored = score_events(events);
-    let peak = session.peak_risk.max(scored.peak);
+    let (mut peak, hash_reason) =
+        apply_known_bad_hash_boost(events, policy, session.peak_risk.max(scored.peak));
     let (mut action, mut reason) =
         decide_action(peak, scored.average, policy, &scored.categories);
+
+    if let Some(hash_reason) = hash_reason {
+        if !policy.observe_only_default {
+            action = DecisionAction::Ban;
+            reason = hash_reason;
+            peak = peak.max(100);
+        } else {
+            reason = format!("{reason}; {hash_reason}");
+        }
+    }
 
     let mut categories = scored.categories;
     if let Some(previous) = previous {
@@ -264,6 +312,35 @@ mod tests {
         );
         assert_eq!(decision.action, DecisionAction::Ban);
         assert_eq!(decision.peak_risk, 95);
+    }
+
+    #[test]
+    fn known_bad_hash_forces_ban_when_enforcing() {
+        let mut policy = policy(false);
+        policy.known_bad_hashes = vec![
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        ];
+
+        let session = SessionRecord {
+            session_id: "s1".into(),
+            game_id: "demo".into(),
+            player_id: "p1".into(),
+            client_version: "1.0".into(),
+            machine_fingerprint: String::new(),
+            target_process: "game.exe".into(),
+            created_at: 1,
+            last_seen_at: 1,
+            peak_risk: 10,
+            finding_count: 0,
+        };
+
+        let mut hit = event("MODULE", 15);
+        hit.details =
+            "hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into();
+
+        let decision = build_decision(&session, &[hit], &policy, None);
+        assert_eq!(decision.action, DecisionAction::Ban);
+        assert!(decision.peak_risk >= 100);
     }
 
     #[test]
