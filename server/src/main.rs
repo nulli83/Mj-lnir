@@ -374,6 +374,41 @@ async fn issue_challenge(
     Ok(Json(json!({ "ok": true, "challenge": challenge })))
 }
 
+async fn get_active_challenge(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_ingest(&state, &headers)?;
+
+    if state.store.get_session(&session_id).is_none() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "unknown session_id"})),
+        ));
+    }
+
+    let key = format!("challenge-active-{session_id}");
+    let Some(challenge) = state.store.get_evidence(&key) else {
+        return Ok(Json(json!({ "ok": true, "challenge": null })));
+    };
+
+    let expires_at = challenge
+        .get("expires_at")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
+
+    if expires_at > 0 && now_ms() > expires_at {
+        return Ok(Json(json!({
+            "ok": true,
+            "challenge": null,
+            "expired": true
+        })));
+    }
+
+    Ok(Json(json!({ "ok": true, "challenge": challenge })))
+}
+
 #[derive(Debug, Deserialize)]
 struct ChallengeResponseBody {
     session_id: String,
@@ -471,7 +506,10 @@ fn app(state: Arc<AppState>) -> Router {
         .route("/health", get(health))
         .route("/v1/sessions", post(create_session))
         .route("/v1/ingest", post(ingest))
-        .route("/v1/challenges/{session_id}", post(issue_challenge))
+        .route(
+            "/v1/challenges/{session_id}",
+            get(get_active_challenge).post(issue_challenge),
+        )
         .route("/v1/challenge-response", post(verify_challenge_response))
         .route("/v1/decisions/{session_id}", get(get_decision))
         .route("/v1/policy/{game_id}", get(get_policy).put(put_policy))

@@ -162,6 +162,187 @@ namespace Mjolnir {
             RegCloseKey(key);
         }
 
+        static void ScanAppInit(
+            int baseWeight,
+            PersistenceScanResult& result
+        ) {
+            HKEY key = nullptr;
+            if (
+                RegOpenKeyExW(
+                    HKEY_LOCAL_MACHINE,
+                    L"Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows",
+                    0,
+                    KEY_READ | KEY_WOW64_64KEY,
+                    &key
+                ) != ERROR_SUCCESS
+            ) {
+                return;
+            }
+
+            ++result.keysInspected;
+
+            wchar_t data[1024] = {};
+            DWORD dataSize = static_cast<DWORD>(sizeof(data));
+            DWORD type = 0;
+            if (
+                RegQueryValueExW(
+                    key,
+                    L"AppInit_DLLs",
+                    nullptr,
+                    &type,
+                    reinterpret_cast<LPBYTE>(data),
+                    &dataSize
+                ) == ERROR_SUCCESS &&
+                (type == REG_SZ || type == REG_EXPAND_SZ)
+            ) {
+                char utf8[1024] = {};
+                WideCharToMultiByte(
+                    CP_UTF8,
+                    0,
+                    data,
+                    -1,
+                    utf8,
+                    sizeof(utf8),
+                    nullptr,
+                    nullptr
+                );
+
+                std::string value = utf8;
+                while (
+                    !value.empty() &&
+                    std::isspace(static_cast<unsigned char>(value.front()))
+                ) {
+                    value.erase(value.begin());
+                }
+
+                if (!value.empty()) {
+                    PersistenceFinding finding{};
+                    finding.location = "HKLM\\...\\Windows\\AppInit_DLLs";
+                    finding.value = value;
+                    finding.riskScore = baseWeight + 15;
+                    finding.reasons.push_back(
+                        "Non-empty AppInit_DLLs (classic DLL injection persistence)"
+                    );
+                    result.findings.push_back(std::move(finding));
+                }
+            }
+
+            RegCloseKey(key);
+        }
+
+        static void ScanIfeoDebuggers(
+            int baseWeight,
+            PersistenceScanResult& result
+        ) {
+            HKEY root = nullptr;
+            if (
+                RegOpenKeyExW(
+                    HKEY_LOCAL_MACHINE,
+                    L"Software\\Microsoft\\Windows NT\\CurrentVersion\\"
+                    L"Image File Execution Options",
+                    0,
+                    KEY_READ | KEY_WOW64_64KEY,
+                    &root
+                ) != ERROR_SUCCESS
+            ) {
+                return;
+            }
+
+            for (DWORD index = 0; ; ++index) {
+                wchar_t subName[256] = {};
+                DWORD subNameSize = static_cast<DWORD>(std::size(subName));
+                const LONG enumStatus = RegEnumKeyExW(
+                    root,
+                    index,
+                    subName,
+                    &subNameSize,
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    nullptr
+                );
+
+                if (enumStatus == ERROR_NO_MORE_ITEMS) {
+                    break;
+                }
+                if (enumStatus != ERROR_SUCCESS) {
+                    continue;
+                }
+
+                ++result.keysInspected;
+
+                HKEY sub = nullptr;
+                if (
+                    RegOpenKeyExW(
+                        root,
+                        subName,
+                        0,
+                        KEY_READ | KEY_WOW64_64KEY,
+                        &sub
+                    ) != ERROR_SUCCESS
+                ) {
+                    continue;
+                }
+
+                wchar_t debugger[1024] = {};
+                DWORD debuggerSize = static_cast<DWORD>(sizeof(debugger));
+                DWORD type = 0;
+                const LONG queryStatus = RegQueryValueExW(
+                    sub,
+                    L"Debugger",
+                    nullptr,
+                    &type,
+                    reinterpret_cast<LPBYTE>(debugger),
+                    &debuggerSize
+                );
+                RegCloseKey(sub);
+
+                if (
+                    queryStatus != ERROR_SUCCESS ||
+                    (type != REG_SZ && type != REG_EXPAND_SZ)
+                ) {
+                    continue;
+                }
+
+                char nameUtf8[256] = {};
+                char debuggerUtf8[1024] = {};
+                WideCharToMultiByte(
+                    CP_UTF8, 0, subName, -1, nameUtf8, sizeof(nameUtf8), nullptr, nullptr
+                );
+                WideCharToMultiByte(
+                    CP_UTF8,
+                    0,
+                    debugger,
+                    -1,
+                    debuggerUtf8,
+                    sizeof(debuggerUtf8),
+                    nullptr,
+                    nullptr
+                );
+
+                const std::string combined = ToLower(
+                    std::string(nameUtf8) + " " + debuggerUtf8
+                );
+
+                PersistenceFinding finding{};
+                finding.location = "HKLM\\...\\IFEO\\" + std::string(nameUtf8);
+                finding.value = std::string("Debugger=") + debuggerUtf8;
+                finding.riskScore = baseWeight + 20;
+                if (LooksSuspicious(combined)) {
+                    finding.reasons.push_back(
+                        "IFEO Debugger matches cheat/debug tooling pattern"
+                    );
+                } else {
+                    finding.reasons.push_back(
+                        "IFEO Debugger redirect present (process hijack vector)"
+                    );
+                }
+                result.findings.push_back(std::move(finding));
+            }
+
+            RegCloseKey(root);
+        }
+
     public:
         static PersistenceScanResult Scan(int baseWeight = 50) {
             PersistenceScanResult result{};
@@ -194,6 +375,9 @@ namespace Mjolnir {
                 baseWeight + 10,
                 result
             );
+
+            ScanAppInit(baseWeight, result);
+            ScanIfeoDebuggers(baseWeight, result);
 
             return result;
         }

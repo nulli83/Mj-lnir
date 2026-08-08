@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Linux `systemd --user` install + login auto-update scripts (PR #6, if not yet merged)
 
+## [1.13.0] - 2026-08-08
+
+### Added
+
+- **Exception/VEH scanner** — compares `KiUserExceptionDispatcher`, `RtlDispatchException`, VEH/APC dispatcher prologues remote vs local
+- **Hosts scanner** — flags game/AC domain redirects in the system hosts file
+- **Token scanner** — elevated / High-System integrity / impersonation tokens on the target
+- **Connection scanner** — established TCP to suspicious remote ports from the game process
+- Persistence coverage extended with **AppInit_DLLs** and **IFEO Debugger** redirects
+- Agent live challenge loop: `GET /v1/challenges/:session_id` + automatic `POST /v1/challenge-response`
+- Critical categories: `EXCEPTION_DISPATCH`, `HOSTS`, `TOKEN`
+
+### Config
+
+- `enable_exception_dispatch_scan`, `enable_hosts_scan`, `enable_token_scan`, `enable_connection_scan`
+- Weights: `exception_dispatch`, `hosts_tamper`, `suspicious_token`, `suspicious_connection`
+
 ## [1.12.0] - 2026-08-08
 
 ### Added

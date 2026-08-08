@@ -37,6 +37,10 @@
     "enable_persistence_scan": true,
     "enable_port_scan": true,
     "enable_etw_scan": true,
+    "enable_exception_dispatch_scan": true,
+    "enable_hosts_scan": true,
+    "enable_token_scan": true,
+    "enable_connection_scan": true,
     "enable_evidence_window": true,
     "evidence_window_ms": 45000,
     "evidence_min_samples": 3,
@@ -515,6 +519,10 @@
     "writable_image": 55,
     "persistence": 50,
     "suspicious_port": 35,
-    "etw_patch": 70
+    "etw_patch": 70,
+    "exception_dispatch": 65,
+    "hosts_tamper": 45,
+    "suspicious_token": 40,
+    "suspicious_connection": 40
   }
 }

@@ -633,6 +633,34 @@ namespace Mjolnir {
                         candidate.settings.enableEtwScan
                     );
 
+                candidate.settings.enableExceptionDispatchScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_exception_dispatch_scan",
+                        candidate.settings.enableExceptionDispatchScan
+                    );
+
+                candidate.settings.enableHostsScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_hosts_scan",
+                        candidate.settings.enableHostsScan
+                    );
+
+                candidate.settings.enableTokenScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_token_scan",
+                        candidate.settings.enableTokenScan
+                    );
+
+                candidate.settings.enableConnectionScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_connection_scan",
+                        candidate.settings.enableConnectionScan
+                    );
+
                 candidate.settings.enableEvidenceWindow =
                     ReadBoolean(
                         settingsObject,
@@ -1068,6 +1096,34 @@ namespace Mjolnir {
                         riskObject,
                         "etw_patch",
                         candidate.riskWeights.etwPatch
+                    );
+
+                candidate.riskWeights.exceptionDispatch =
+                    ReadInteger(
+                        riskObject,
+                        "exception_dispatch",
+                        candidate.riskWeights.exceptionDispatch
+                    );
+
+                candidate.riskWeights.hostsTamper =
+                    ReadInteger(
+                        riskObject,
+                        "hosts_tamper",
+                        candidate.riskWeights.hostsTamper
+                    );
+
+                candidate.riskWeights.suspiciousToken =
+                    ReadInteger(
+                        riskObject,
+                        "suspicious_token",
+                        candidate.riskWeights.suspiciousToken
+                    );
+
+                candidate.riskWeights.suspiciousConnection =
+                    ReadInteger(
+                        riskObject,
+                        "suspicious_connection",
+                        candidate.riskWeights.suspiciousConnection
                     );
             }
 
