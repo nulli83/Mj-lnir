@@ -227,6 +227,85 @@ impl ServerBridge {
 
         Ok(())
     }
+
+    async fn poll_and_answer_challenge(&mut self) -> Result<(), String> {
+        if let Err(error) = self.ensure_session().await {
+            return Err(error);
+        }
+
+        let session_id = self
+            .session_id
+            .clone()
+            .ok_or_else(|| "missing session".to_string())?;
+
+        let mut request = self
+            .http
+            .get(format!(
+                "{}/v1/challenges/{}",
+                self.config.base_url, session_id
+            ));
+
+        if !self.config.ingest_key.is_empty() {
+            request = request.bearer_auth(&self.config.ingest_key);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("challenge poll failed: {error}"))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "challenge poll HTTP {}",
+                response.status().as_u16()
+            ));
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|error| format!("challenge poll parse failed: {error}"))?;
+
+        let Some(challenge) = body.get("challenge").filter(|value| !value.is_null()) else {
+            return Ok(());
+        };
+
+        let nonce = challenge
+            .get("nonce")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+
+        if nonce.is_empty() {
+            return Err("active challenge missing nonce".into());
+        }
+
+        let mut respond = self
+            .http
+            .post(format!("{}/v1/challenge-response", self.config.base_url))
+            .json(&serde_json::json!({
+                "session_id": session_id,
+                "nonce": nonce,
+            }));
+
+        if !self.config.ingest_key.is_empty() {
+            respond = respond.bearer_auth(&self.config.ingest_key);
+        }
+
+        let response = respond
+            .send()
+            .await
+            .map_err(|error| format!("challenge response failed: {error}"))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "challenge response HTTP {}",
+                response.status().as_u16()
+            ));
+        }
+
+        println!("[+] Answered live challenge for session {session_id}");
+        Ok(())
+    }
 }
 
 struct AuthState {
@@ -400,6 +479,7 @@ async fn serve_pipe_session(
     let mut buffer = vec![0u8; 8192];
     let mut pending = String::new();
     let mut last_flush = tokio::time::Instant::now();
+    let mut last_challenge = tokio::time::Instant::now();
     let mut flush_tick = tokio::time::interval(Duration::from_secs(1));
     flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -427,12 +507,20 @@ async fn serve_pipe_session(
                 }
             }
             _ = flush_tick.tick() => {
-                if last_flush.elapsed() < Duration::from_secs(5) {
-                    continue;
-                }
-
                 if let Some(bridge) = &bridge {
                     let mut guard = bridge.lock().await;
+
+                    if last_challenge.elapsed() >= Duration::from_secs(15) {
+                        if let Err(error) = guard.poll_and_answer_challenge().await {
+                            eprintln!("[!] Challenge poll failed: {error}");
+                        }
+                        last_challenge = tokio::time::Instant::now();
+                    }
+
+                    if last_flush.elapsed() < Duration::from_secs(5) {
+                        continue;
+                    }
+
                     if let Err(error) = guard.flush().await {
                         eprintln!("[!] Server flush failed: {error}");
                     }
@@ -465,6 +553,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Err(error) = guard.ensure_session().await {
             eprintln!("[!] Could not open server session yet: {error}");
         }
+    }
+
+    if let Some(bridge) = bridge.clone() {
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(15));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let mut guard = bridge.lock().await;
+                if let Err(error) = guard.poll_and_answer_challenge().await {
+                    eprintln!("[!] Challenge poll failed: {error}");
+                }
+            }
+        });
     }
 
     loop {

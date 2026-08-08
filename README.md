@@ -49,7 +49,7 @@ shared/       # cross-cutting protocol docs
 
 ## Client detection vectors (summary)
 
-Modules, overlays, handles, debugger, integrity, RWX regions, threads, provenance, IAT/inline/EAT hooks, ntdll syscall-stub integrity, ETW/trace patches, manual-map, process hollowing/remap, writable image code caves, weakened mitigations (DEP/ASLR/CFG), instrumentation callbacks / ThreadHideFromDebugger, image integrity, artifacts, services, baselines, lifetime, injection heuristics, dangerous privileges, suspicious named pipes, autorun persistence, suspicious listening ports, evidence-gated local enforce, twin watchdog, self-protect, timing, process watch, optional HMAC IPC.
+Modules, overlays, handles, debugger, integrity, RWX regions, threads, provenance, IAT/inline/EAT hooks, ntdll syscall-stub integrity, ETW/trace patches, exception/VEH/APC dispatcher integrity, manual-map, process hollowing/remap, writable image code caves, weakened mitigations (DEP/ASLR/CFG), instrumentation callbacks / ThreadHideFromDebugger, image integrity, artifacts, services, baselines, lifetime, injection heuristics, dangerous privileges, suspicious named pipes, autorun/AppInit/IFEO persistence, hosts file redirects, suspicious listening ports & outbound connections, process token anomalies, evidence-gated local enforce, twin watchdog, self-protect, timing, process watch, optional HMAC IPC.
 
 Default local mode is **observe-only** (`client/core/whitelist.json`).
 
@@ -93,6 +93,6 @@ The client runs on a hostile machine. Evidence is valuable for ranking and inves
 
 ## Status
 
-v1.12.0 — writable-image, persistence, ports, ETW patch scanners + challenge-response.
+v1.13.0 — VEH/exception dispatch, hosts, token, connections + agent challenge loop.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for full history.

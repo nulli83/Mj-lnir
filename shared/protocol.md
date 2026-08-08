@@ -67,3 +67,17 @@ Game servers should:
 1. Map `player_id` to their account system
 2. Apply `kick` / `ban` in their own authority path
 3. Prefer webhook + poll for redundancy
+
+## Live challenges
+
+Studio issues a presence challenge:
+
+`POST /v1/challenges/{session_id}` (studio auth)
+
+Agent polls and answers:
+
+`GET /v1/challenges/{session_id}` (ingest auth) → `{ "challenge": { "nonce": "..." } | null }`
+
+`POST /v1/challenge-response` (ingest auth) with `{ "session_id", "nonce" }`
+
+Verified receipts are stored as evidence under `challenge-ok-{session_id}`.

@@ -180,6 +180,26 @@ namespace Mjolnir {
         bool enableEtwScan = true;
 
         /*
+         * När true jämförs exception/VEH/APC-dispatcher prologues.
+         */
+        bool enableExceptionDispatchScan = true;
+
+        /*
+         * När true skannas hosts-filen efter AC/game-omdirigeringar.
+         */
+        bool enableHostsScan = true;
+
+        /*
+         * När true inspekteras målprocessens access token.
+         */
+        bool enableTokenScan = true;
+
+        /*
+         * När true skannas ESTABLISHED TCP till misstänkta portar.
+         */
+        bool enableConnectionScan = true;
+
+        /*
          * När true kräver enforce ett glidande evidence-fönster
          * (inte bara en enskild cykel-peak).
          */
@@ -254,6 +274,10 @@ namespace Mjolnir {
         int persistence = 50;
         int suspiciousPort = 35;
         int etwPatch = 70;
+        int exceptionDispatch = 65;
+        int hostsTamper = 45;
+        int suspiciousToken = 40;
+        int suspiciousConnection = 40;
     };
 
     struct ConfigSnapshot {

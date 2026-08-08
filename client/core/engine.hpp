@@ -12,9 +12,11 @@
 #include "devices.hpp"
 #include "eat_hooks.hpp"
 #include "etw.hpp"
+#include "exception_dispatch.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
 #include "hollowing.hpp"
+#include "hosts.hpp"
 #include "image_integrity.hpp"
 #include "inline_hooks.hpp"
 #include "injection.hpp"
@@ -36,7 +38,9 @@
 #include "syscall_stubs.hpp"
 #include "threads.hpp"
 #include "timing.hpp"
+#include "token.hpp"
 #include "writable_image.hpp"
+#include "connections.hpp"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -85,7 +89,11 @@ namespace Mjolnir {
         WritableImage,
         Persistence,
         Port,
-        Etw
+        Etw,
+        ExceptionDispatch,
+        Hosts,
+        Token,
+        Connection
     };
 
     struct SecurityFinding {
@@ -236,6 +244,14 @@ namespace Mjolnir {
                     return "PORT";
                 case FindingCategory::Etw:
                     return "ETW";
+                case FindingCategory::ExceptionDispatch:
+                    return "EXCEPTION_DISPATCH";
+                case FindingCategory::Hosts:
+                    return "HOSTS";
+                case FindingCategory::Token:
+                    return "TOKEN";
+                case FindingCategory::Connection:
+                    return "CONNECTION";
                 default:
                     return "UNKNOWN";
             }
@@ -1870,6 +1886,155 @@ namespace Mjolnir {
             }
         }
 
+        void ScanExceptionDispatch(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableExceptionDispatchScan) {
+                return;
+            }
+
+            const ExceptionDispatchScanResult scan =
+                ExceptionDispatchScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.exceptionDispatch
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const ExceptionDispatchFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::ExceptionDispatch,
+                        ThreatLevel::LOW,
+                        "Exception/VEH/APC dispatcher appears hooked",
+                        "Function='" + finding.functionName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanHosts(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableHostsScan) {
+                return;
+            }
+
+            const HostsScanResult scan =
+                HostsScanner::Scan(snapshot.riskWeights.hostsTamper);
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const HostsFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Hosts,
+                        ThreatLevel::LOW,
+                        "Suspicious hosts file redirect",
+                        "Entry='" + finding.line +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        0,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanToken(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableTokenScan) {
+                return;
+            }
+
+            const TokenScanResult scan =
+                TokenScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.suspiciousToken
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const TokenFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Token,
+                        ThreatLevel::LOW,
+                        "Suspicious process token attributes",
+                        "Integrity='" + finding.integrityLevel +
+                            "' Elevated=" +
+                            std::string(finding.elevated ? "yes" : "no") +
+                            " Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanConnections(
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableConnectionScan) {
+                return;
+            }
+
+            const ConnectionScanResult scan =
+                ConnectionScanner::ScanEstablished(
+                    targetPid,
+                    snapshot.riskWeights.suspiciousConnection
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const ConnectionFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Connection,
+                        ThreatLevel::LOW,
+                        "Suspicious established TCP connection",
+                        "Remote=" + finding.remoteAddress +
+                            ":" + std::to_string(finding.remotePort) +
+                            " LocalPort=" +
+                            std::to_string(finding.localPort) +
+                            " OwnerPid=" +
+                            std::to_string(finding.owningPid) +
+                            " Reasons=" +
+                            JoinReasons(finding.reasons),
+                        finding.owningPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -2153,6 +2318,44 @@ namespace Mjolnir {
                     snapshot,
                     report
                 );
+            }
+
+            if (
+                snapshot.settings.enableExceptionDispatchScan &&
+                (cycleCounter_ % 5 == 1)
+            ) {
+                ScanExceptionDispatch(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableHostsScan &&
+                (cycleCounter_ % 20 == 9)
+            ) {
+                ScanHosts(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableTokenScan &&
+                (cycleCounter_ % 8 == 2)
+            ) {
+                ScanToken(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableConnectionScan &&
+                (cycleCounter_ % 7 == 5)
+            ) {
+                ScanConnections(targetPid, snapshot, report);
             }
 
             CloseHandle(processHandle);
