@@ -13,6 +13,7 @@
 #include "eat_hooks.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
+#include "hollowing.hpp"
 #include "image_integrity.hpp"
 #include "inline_hooks.hpp"
 #include "injection.hpp"
@@ -20,6 +21,7 @@
 #include "lifetime.hpp"
 #include "manual_map.hpp"
 #include "memory.hpp"
+#include "mitigations.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
 #include "pipes.hpp"
@@ -27,6 +29,8 @@
 #include "process.hpp"
 #include "regions.hpp"
 #include "services.hpp"
+#include "stealth.hpp"
+#include "syscall_stubs.hpp"
 #include "threads.hpp"
 #include "timing.hpp"
 
@@ -69,7 +73,11 @@ namespace Mjolnir {
         Injection,
         Privilege,
         EatHook,
-        Pipe
+        Pipe,
+        SyscallStub,
+        Hollowing,
+        Mitigation,
+        Stealth
     };
 
     struct SecurityFinding {
@@ -204,6 +212,14 @@ namespace Mjolnir {
                     return "EAT_HOOK";
                 case FindingCategory::Pipe:
                     return "PIPE";
+                case FindingCategory::SyscallStub:
+                    return "SYSCALL_STUB";
+                case FindingCategory::Hollowing:
+                    return "HOLLOWING";
+                case FindingCategory::Mitigation:
+                    return "MITIGATION";
+                case FindingCategory::Stealth:
+                    return "STEALTH";
                 default:
                     return "UNKNOWN";
             }
@@ -1535,6 +1551,157 @@ namespace Mjolnir {
             }
         }
 
+        void ScanSyscallStubs(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableSyscallStubScan) {
+                return;
+            }
+
+            const SyscallStubScanResult scan =
+                SyscallStubScanner::ScanCriticalStubs(
+                    processHandle,
+                    snapshot.riskWeights.syscallStub
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const SyscallStubFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::SyscallStub,
+                        ThreatLevel::LOW,
+                        "Critical ntdll syscall stub looks patched",
+                        "Function='" + finding.functionName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanHollowing(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableHollowingScan) {
+                return;
+            }
+
+            const HollowingScanResult scan =
+                HollowingScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.hollowing
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const HollowingFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Hollowing,
+                        ThreatLevel::LOW,
+                        "Process image layout suggests hollowing/remap",
+                        JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanMitigations(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableMitigationScan) {
+                return;
+            }
+
+            const MitigationScanResult scan =
+                MitigationScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.mitigation
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const MitigationFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Mitigation,
+                        ThreatLevel::LOW,
+                        "Process mitigation policy looks weakened",
+                        JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanStealth(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableStealthScan) {
+                return;
+            }
+
+            const StealthScanResult scan =
+                StealthScanner::Scan(
+                    processHandle,
+                    targetPid,
+                    snapshot.riskWeights.stealth
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const StealthFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Stealth,
+                        ThreatLevel::LOW,
+                        "Anti-analysis / stealth technique detected",
+                        (
+                            finding.threadId != 0
+                                ? ("Thread=" +
+                                   std::to_string(finding.threadId) +
+                                   " ")
+                                : ""
+                        ) +
+                            "Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -1732,6 +1899,54 @@ namespace Mjolnir {
                 (cycleCounter_ % 4 == 0)
             ) {
                 ScanPipes(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableSyscallStubScan &&
+                (cycleCounter_ % 5 == 4)
+            ) {
+                ScanSyscallStubs(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableHollowingScan &&
+                (cycleCounter_ % 6 == 1)
+            ) {
+                ScanHollowing(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableMitigationScan &&
+                (cycleCounter_ % 8 == 3)
+            ) {
+                ScanMitigations(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableStealthScan &&
+                (cycleCounter_ % 5 == 2)
+            ) {
+                ScanStealth(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
             }
 
             CloseHandle(processHandle);

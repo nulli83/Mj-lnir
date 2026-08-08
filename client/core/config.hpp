@@ -140,6 +140,26 @@ namespace Mjolnir {
         bool enablePipeScan = true;
 
         /*
+         * När true jämförs ntdll syscall-stub prologues remote vs local.
+         */
+        bool enableSyscallStubScan = true;
+
+        /*
+         * När true körs process-hollowing / section-remap heuristik.
+         */
+        bool enableHollowingScan = true;
+
+        /*
+         * När true kontrolleras process mitigation policies.
+         */
+        bool enableMitigationScan = true;
+
+        /*
+         * När true letas instrumentation callbacks / ThreadHideFromDebugger.
+         */
+        bool enableStealthScan = true;
+
+        /*
          * När true kräver enforce ett glidande evidence-fönster
          * (inte bara en enskild cykel-peak).
          */
@@ -206,6 +226,10 @@ namespace Mjolnir {
         int dangerousPrivilege = 45;
         int eatHook = 55;
         int suspiciousPipe = 50;
+        int syscallStub = 60;
+        int hollowing = 70;
+        int mitigation = 40;
+        int stealth = 65;
     };
 
     struct ConfigSnapshot {

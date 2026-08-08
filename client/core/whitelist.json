@@ -29,6 +29,10 @@
     "enable_privilege_scan": true,
     "enable_eat_hook_scan": true,
     "enable_pipe_scan": true,
+    "enable_syscall_stub_scan": true,
+    "enable_hollowing_scan": true,
+    "enable_mitigation_scan": true,
+    "enable_stealth_scan": true,
     "enable_evidence_window": true,
     "evidence_window_ms": 45000,
     "evidence_min_samples": 3,
@@ -499,6 +503,10 @@
     "injection": 50,
     "dangerous_privilege": 45,
     "eat_hook": 55,
-    "suspicious_pipe": 50
+    "suspicious_pipe": 50,
+    "syscall_stub": 60,
+    "hollowing": 70,
+    "mitigation": 40,
+    "stealth": 65
   }
 }

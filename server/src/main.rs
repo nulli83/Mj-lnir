@@ -323,6 +323,48 @@ async fn put_policy(
     Ok(Json(json!({ "ok": true, "policy": policy })))
 }
 
+async fn issue_challenge(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_studio(&state, &headers)?;
+
+    let session = state.store.get_session(&session_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "unknown session_id"})),
+        )
+    })?;
+
+    let nonce = Uuid::new_v4().to_string();
+    let issued_at = now_ms();
+    let expires_at = issued_at + 60_000;
+
+    let challenge = json!({
+        "session_id": session.session_id,
+        "game_id": session.game_id,
+        "player_id": session.player_id,
+        "nonce": nonce,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "instructions": [
+            "Client must echo nonce in next ingest batch details or a future /v1/challenge-response",
+            "Use for live presence / anti-replay of offline bots"
+        ]
+    });
+
+    state
+        .store
+        .put_evidence(
+            &format!("challenge-{}-{}", session.session_id, issued_at),
+            &challenge,
+        )
+        .map_err(store_error)?;
+
+    Ok(Json(json!({ "ok": true, "challenge": challenge })))
+}
+
 fn store_error(error: store::StoreError) -> (StatusCode, Json<Value>) {
     match error {
         store::StoreError::InvalidKey => (
@@ -344,6 +386,7 @@ fn app(state: Arc<AppState>) -> Router {
         .route("/health", get(health))
         .route("/v1/sessions", post(create_session))
         .route("/v1/ingest", post(ingest))
+        .route("/v1/challenges/{session_id}", post(issue_challenge))
         .route("/v1/decisions/{session_id}", get(get_decision))
         .route("/v1/policy/{game_id}", get(get_policy).put(put_policy))
         .layer(CorsLayer::permissive())
