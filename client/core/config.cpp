@@ -605,6 +605,34 @@ namespace Mjolnir {
                         candidate.settings.enableStealthScan
                     );
 
+                candidate.settings.enableWritableImageScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_writable_image_scan",
+                        candidate.settings.enableWritableImageScan
+                    );
+
+                candidate.settings.enablePersistenceScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_persistence_scan",
+                        candidate.settings.enablePersistenceScan
+                    );
+
+                candidate.settings.enablePortScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_port_scan",
+                        candidate.settings.enablePortScan
+                    );
+
+                candidate.settings.enableEtwScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_etw_scan",
+                        candidate.settings.enableEtwScan
+                    );
+
                 candidate.settings.enableEvidenceWindow =
                     ReadBoolean(
                         settingsObject,
@@ -1012,6 +1040,34 @@ namespace Mjolnir {
                         riskObject,
                         "stealth",
                         candidate.riskWeights.stealth
+                    );
+
+                candidate.riskWeights.writableImage =
+                    ReadInteger(
+                        riskObject,
+                        "writable_image",
+                        candidate.riskWeights.writableImage
+                    );
+
+                candidate.riskWeights.persistence =
+                    ReadInteger(
+                        riskObject,
+                        "persistence",
+                        candidate.riskWeights.persistence
+                    );
+
+                candidate.riskWeights.suspiciousPort =
+                    ReadInteger(
+                        riskObject,
+                        "suspicious_port",
+                        candidate.riskWeights.suspiciousPort
+                    );
+
+                candidate.riskWeights.etwPatch =
+                    ReadInteger(
+                        riskObject,
+                        "etw_patch",
+                        candidate.riskWeights.etwPatch
                     );
             }
 
@@ -1965,7 +2021,11 @@ namespace Mjolnir {
             !validRiskWeight(weights.syscallStub) ||
             !validRiskWeight(weights.hollowing) ||
             !validRiskWeight(weights.mitigation) ||
-            !validRiskWeight(weights.stealth)
+            !validRiskWeight(weights.stealth) ||
+            !validRiskWeight(weights.writableImage) ||
+            !validRiskWeight(weights.persistence) ||
+            !validRiskWeight(weights.suspiciousPort) ||
+            !validRiskWeight(weights.etwPatch)
         ) {
             errorMessage =
                 "Every risk weight must be between "

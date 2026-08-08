@@ -11,6 +11,7 @@
 #include "debugger.hpp"
 #include "devices.hpp"
 #include "eat_hooks.hpp"
+#include "etw.hpp"
 #include "handles.hpp"
 #include "hooks.hpp"
 #include "hollowing.hpp"
@@ -24,7 +25,9 @@
 #include "mitigations.hpp"
 #include "modules.hpp"
 #include "overlay.hpp"
+#include "persistence.hpp"
 #include "pipes.hpp"
+#include "ports.hpp"
 #include "privileges.hpp"
 #include "process.hpp"
 #include "regions.hpp"
@@ -33,6 +36,7 @@
 #include "syscall_stubs.hpp"
 #include "threads.hpp"
 #include "timing.hpp"
+#include "writable_image.hpp"
 
 #include <windows.h>
 #include <tlhelp32.h>
@@ -77,7 +81,11 @@ namespace Mjolnir {
         SyscallStub,
         Hollowing,
         Mitigation,
-        Stealth
+        Stealth,
+        WritableImage,
+        Persistence,
+        Port,
+        Etw
     };
 
     struct SecurityFinding {
@@ -220,6 +228,14 @@ namespace Mjolnir {
                     return "MITIGATION";
                 case FindingCategory::Stealth:
                     return "STEALTH";
+                case FindingCategory::WritableImage:
+                    return "WRITABLE_IMAGE";
+                case FindingCategory::Persistence:
+                    return "PERSISTENCE";
+                case FindingCategory::Port:
+                    return "PORT";
+                case FindingCategory::Etw:
+                    return "ETW";
                 default:
                     return "UNKNOWN";
             }
@@ -1702,6 +1718,158 @@ namespace Mjolnir {
             }
         }
 
+        void ScanWritableImages(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableWritableImageScan) {
+                return;
+            }
+
+            const WritableImageScanResult scan =
+                WritableImageScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.writableImage
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const WritableImageFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::WritableImage,
+                        ThreatLevel::LOW,
+                        "Image section is writable+executable (code cave)",
+                        "Module='" + finding.moduleName +
+                            "' Address=0x" +
+                            [&]() {
+                                std::ostringstream stream;
+                                stream << std::hex << finding.address;
+                                return stream.str();
+                            }() +
+                            " Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanPersistence(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enablePersistenceScan) {
+                return;
+            }
+
+            const PersistenceScanResult scan =
+                PersistenceScanner::Scan(
+                    snapshot.riskWeights.persistence
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const PersistenceFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Persistence,
+                        ThreatLevel::LOW,
+                        "Suspicious autorun persistence entry",
+                        "Location='" + finding.location +
+                            "' Value='" + finding.value +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        0,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanPorts(
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enablePortScan) {
+                return;
+            }
+
+            const PortScanResult scan =
+                PortScanner::ScanListeningPorts(
+                    snapshot.riskWeights.suspiciousPort
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const PortFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Port,
+                        ThreatLevel::LOW,
+                        "Suspicious listening TCP port",
+                        "Port=" + std::to_string(finding.port) +
+                            " Protocol=" + finding.protocol +
+                            " OwnerPid=" +
+                            std::to_string(finding.owningPid) +
+                            " Reasons=" +
+                            JoinReasons(finding.reasons),
+                        finding.owningPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
+        void ScanEtw(
+            HANDLE processHandle,
+            DWORD targetPid,
+            const ConfigSnapshot& snapshot,
+            ScanCycleReport& report
+        ) {
+            if (!snapshot.settings.enableEtwScan) {
+                return;
+            }
+
+            const EtwScanResult scan =
+                EtwPatchScanner::Scan(
+                    processHandle,
+                    snapshot.riskWeights.etwPatch
+                );
+
+            if (!scan.Success()) {
+                return;
+            }
+
+            for (const EtwFinding& finding : scan.findings) {
+                EmitFinding(
+                    report,
+                    SecurityFinding{
+                        FindingCategory::Etw,
+                        ThreatLevel::LOW,
+                        "ETW/trace export appears patched",
+                        "Function='" + finding.functionName +
+                            "' Reasons=" +
+                            JoinReasons(finding.reasons),
+                        targetPid,
+                        finding.riskScore
+                    }
+                );
+            }
+        }
+
     public:
         explicit SecurityEngine(ConfigManager& config)
             : config_(config) {}
@@ -1942,6 +2110,44 @@ namespace Mjolnir {
                 (cycleCounter_ % 5 == 2)
             ) {
                 ScanStealth(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enableWritableImageScan &&
+                (cycleCounter_ % 4 == 3)
+            ) {
+                ScanWritableImages(
+                    processHandle,
+                    targetPid,
+                    snapshot,
+                    report
+                );
+            }
+
+            if (
+                snapshot.settings.enablePersistenceScan &&
+                (cycleCounter_ % 15 == 7)
+            ) {
+                ScanPersistence(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enablePortScan &&
+                (cycleCounter_ % 7 == 3)
+            ) {
+                ScanPorts(snapshot, report);
+            }
+
+            if (
+                snapshot.settings.enableEtwScan &&
+                (cycleCounter_ % 6 == 4)
+            ) {
+                ScanEtw(
                     processHandle,
                     targetPid,
                     snapshot,
