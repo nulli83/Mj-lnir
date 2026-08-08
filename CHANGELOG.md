@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-
-- Linux `systemd --user` install + login auto-update scripts (PR #6, if not yet merged)
-
 ## [1.13.0] - 2026-08-08
 
 ### Added
