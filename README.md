@@ -93,8 +93,11 @@ The client runs on a hostile machine. Evidence is valuable for ranking and inves
 
 ## Status
 
-v1.9.1 — self-hosted studio server:
+v1.9.1 — self-hosted studio server + audit bugfixes.
+
+See [`CHANGELOG.md`](CHANGELOG.md) for the full release history.
 
 * `client/` packages what players install
 * `server/` is a Rust binary (sessions, ingest, policy, decisions) — no Cloudflare
 * client agent forwards telemetry when `MJOLNIR_SERVER_URL` is set
+* critical ingest/observe_only/evidence bugs fixed on `main`
