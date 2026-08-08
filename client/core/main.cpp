@@ -223,12 +223,12 @@ int main(int argc, char** argv) {
     Mjolnir::SecurityAlertSystem::DispatchAlert(
         Mjolnir::ThreatLevel::LOW,
         "DAEMON",
-        "[Mjölnir v1.8.0] Security core armed. "
+        "[Mjölnir v1.10.0] Security core armed. "
         "Vectors: modules, overlays, handles, debugger, "
         "integrity, memory-regions, threads, provenance, "
-        "hooks, inline-hooks, manual-map, devices, image, "
+        "hooks, inline-hooks, eat-hooks, manual-map, devices, image, "
         "artifacts, services, baseline, lifetime, injection, "
-        "evidence-window, hmac-ipc, self-protect, "
+        "privileges, pipes, evidence-window, hmac-ipc, self-protect, "
         "twin-watchdog, timing, process-watch."
     );
 

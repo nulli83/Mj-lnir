@@ -125,6 +125,21 @@ namespace Mjolnir {
         bool enableInjectionHeuristics = true;
 
         /*
+         * När true skannas processer efter farliga privileges (SeDebug m.fl.).
+         */
+        bool enablePrivilegeScan = true;
+
+        /*
+         * När true jämförs kritiska EAT-exporters i målprocessen.
+         */
+        bool enableEatHookScan = true;
+
+        /*
+         * När true skannas named pipes efter kända cheat/debug-mönster.
+         */
+        bool enablePipeScan = true;
+
+        /*
          * När true kräver enforce ett glidande evidence-fönster
          * (inte bara en enskild cykel-peak).
          */
@@ -188,6 +203,9 @@ namespace Mjolnir {
         int regionEscalate = 55;
         int handleBirth = 40;
         int injection = 50;
+        int dangerousPrivilege = 45;
+        int eatHook = 55;
+        int suspiciousPipe = 50;
     };
 
     struct ConfigSnapshot {

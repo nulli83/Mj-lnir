@@ -556,6 +556,27 @@ namespace Mjolnir {
                             .enableInjectionHeuristics
                     );
 
+                candidate.settings.enablePrivilegeScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_privilege_scan",
+                        candidate.settings.enablePrivilegeScan
+                    );
+
+                candidate.settings.enableEatHookScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_eat_hook_scan",
+                        candidate.settings.enableEatHookScan
+                    );
+
+                candidate.settings.enablePipeScan =
+                    ReadBoolean(
+                        settingsObject,
+                        "enable_pipe_scan",
+                        candidate.settings.enablePipeScan
+                    );
+
                 candidate.settings.enableEvidenceWindow =
                     ReadBoolean(
                         settingsObject,
@@ -914,6 +935,27 @@ namespace Mjolnir {
                         riskObject,
                         "injection",
                         candidate.riskWeights.injection
+                    );
+
+                candidate.riskWeights.dangerousPrivilege =
+                    ReadInteger(
+                        riskObject,
+                        "dangerous_privilege",
+                        candidate.riskWeights.dangerousPrivilege
+                    );
+
+                candidate.riskWeights.eatHook =
+                    ReadInteger(
+                        riskObject,
+                        "eat_hook",
+                        candidate.riskWeights.eatHook
+                    );
+
+                candidate.riskWeights.suspiciousPipe =
+                    ReadInteger(
+                        riskObject,
+                        "suspicious_pipe",
+                        candidate.riskWeights.suspiciousPipe
                     );
             }
 
@@ -1860,7 +1902,10 @@ namespace Mjolnir {
             !validRiskWeight(weights.regionBirth) ||
             !validRiskWeight(weights.regionEscalate) ||
             !validRiskWeight(weights.handleBirth) ||
-            !validRiskWeight(weights.injection)
+            !validRiskWeight(weights.injection) ||
+            !validRiskWeight(weights.dangerousPrivilege) ||
+            !validRiskWeight(weights.eatHook) ||
+            !validRiskWeight(weights.suspiciousPipe)
         ) {
             errorMessage =
                 "Every risk weight must be between "

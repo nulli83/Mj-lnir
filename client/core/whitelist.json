@@ -26,6 +26,9 @@
     "enable_twin_watchdog": true,
     "enable_self_protect": true,
     "enable_injection_heuristics": true,
+    "enable_privilege_scan": true,
+    "enable_eat_hook_scan": true,
+    "enable_pipe_scan": true,
     "enable_evidence_window": true,
     "evidence_window_ms": 45000,
     "evidence_min_samples": 3,
@@ -493,6 +496,9 @@
     "region_birth": 45,
     "region_escalate": 55,
     "handle_birth": 40,
-    "injection": 50
+    "injection": 50,
+    "dangerous_privilege": 45,
+    "eat_hook": 55,
+    "suspicious_pipe": 50
   }
 }

@@ -49,7 +49,7 @@ shared/       # cross-cutting protocol docs
 
 ## Client detection vectors (summary)
 
-Modules, overlays, handles, debugger, integrity, RWX regions, threads, provenance, IAT/inline hooks, manual-map, image integrity, artifacts, services, baselines, lifetime, injection heuristics, evidence-gated local enforce, twin watchdog, self-protect, timing, process watch, optional HMAC IPC.
+Modules, overlays, handles, debugger, integrity, RWX regions, threads, provenance, IAT/inline/EAT hooks, manual-map, image integrity, artifacts, services, baselines, lifetime, injection heuristics, dangerous privileges, suspicious named pipes, evidence-gated local enforce, twin watchdog, self-protect, timing, process watch, optional HMAC IPC.
 
 Default local mode is **observe-only** (`client/core/whitelist.json`).
 
@@ -93,8 +93,11 @@ The client runs on a hostile machine. Evidence is valuable for ranking and inves
 
 ## Status
 
-v1.9.1 — self-hosted studio server:
+v1.10.0 — privilege / EAT / named-pipe scanners + server known_bad_hashes enforcement.
+
+See [`CHANGELOG.md`](CHANGELOG.md) when present for full history.
 
 * `client/` packages what players install
 * `server/` is a Rust binary (sessions, ingest, policy, decisions) — no Cloudflare
 * client agent forwards telemetry when `MJOLNIR_SERVER_URL` is set
+* critical ingest/observe_only/evidence bugs fixed on `main`
