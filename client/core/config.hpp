@@ -160,6 +160,26 @@ namespace Mjolnir {
         bool enableStealthScan = true;
 
         /*
+         * När true letas writable+executable MEM_IMAGE-regioner (code caves).
+         */
+        bool enableWritableImageScan = true;
+
+        /*
+         * När true skannas Run/RunOnce efter kända cheat-strängar.
+         */
+        bool enablePersistenceScan = true;
+
+        /*
+         * När true skannas lyssnande TCP-portar.
+         */
+        bool enablePortScan = true;
+
+        /*
+         * När true kontrolleras ETW/trace-exports för patchar.
+         */
+        bool enableEtwScan = true;
+
+        /*
          * När true kräver enforce ett glidande evidence-fönster
          * (inte bara en enskild cykel-peak).
          */
@@ -230,6 +250,10 @@ namespace Mjolnir {
         int hollowing = 70;
         int mitigation = 40;
         int stealth = 65;
+        int writableImage = 55;
+        int persistence = 50;
+        int suspiciousPort = 35;
+        int etwPatch = 70;
     };
 
     struct ConfigSnapshot {

@@ -51,6 +51,8 @@ target_link_libraries(mjolnir_core
         advapi32
         psapi
         bcrypt
+        iphlpapi
+        ws2_32
 )
 
 target_link_libraries(mjolnir_watchdog

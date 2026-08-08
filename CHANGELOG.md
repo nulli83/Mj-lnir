@@ -10,6 +10,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Linux `systemd --user` install + login auto-update scripts (PR #6, if not yet merged)
 
+## [1.12.0] - 2026-08-08
+
+### Added
+
+- **Writable image scanner** — MEM_IMAGE regions that are writable+executable (code caves)
+- **Persistence scanner** — HKCU/HKLM Run/RunOnce entries matching cheat/debug tooling
+- **Port scanner** — listening TCP ports commonly used by remote/cheat tools
+- **ETW patch scanner** — patched `EtwEventWrite` / `NtTraceEvent` prologues
+- Server `POST /v1/challenge-response` to verify studio-issued challenge nonces
+- Critical categories: `WRITABLE_IMAGE`, `ETW`, `PERSISTENCE`
+
 ## [1.11.0] - 2026-08-08
 
 ### Added

@@ -181,4 +181,13 @@ impl Store {
             .insert(key.to_string(), value.clone());
         Ok(())
     }
+
+    pub fn get_evidence(&self, key: &str) -> Option<Value> {
+        self.inner
+            .read()
+            .expect("store lock")
+            .evidence
+            .get(key)
+            .cloned()
+    }
 }

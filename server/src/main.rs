@@ -349,7 +349,7 @@ async fn issue_challenge(
         "issued_at": issued_at,
         "expires_at": expires_at,
         "instructions": [
-            "Client must echo nonce in next ingest batch details or a future /v1/challenge-response",
+            "Client must POST /v1/challenge-response with the nonce",
             "Use for live presence / anti-replay of offline bots"
         ]
     });
@@ -362,7 +362,92 @@ async fn issue_challenge(
         )
         .map_err(store_error)?;
 
+    // Also store under a stable key for response verification.
+    state
+        .store
+        .put_evidence(
+            &format!("challenge-active-{}", session.session_id),
+            &challenge,
+        )
+        .map_err(store_error)?;
+
     Ok(Json(json!({ "ok": true, "challenge": challenge })))
+}
+
+#[derive(Debug, Deserialize)]
+struct ChallengeResponseBody {
+    session_id: String,
+    nonce: String,
+}
+
+async fn verify_challenge_response(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ChallengeResponseBody>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_ingest(&state, &headers)?;
+
+    if body.session_id.trim().is_empty() || body.nonce.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"ok": false, "error": "session_id and nonce are required"})),
+        ));
+    }
+
+    let key = format!("challenge-active-{}", body.session_id);
+    let Some(raw) = state.store.get_evidence(&key) else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "no active challenge for session"})),
+        ));
+    };
+
+    let expected_nonce = raw
+        .get("nonce")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let expires_at = raw
+        .get("expires_at")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0);
+
+    if expected_nonce.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"ok": false, "error": "challenge malformed"})),
+        ));
+    }
+
+    if now_ms() > expires_at {
+        return Err((
+            StatusCode::GONE,
+            Json(json!({"ok": false, "error": "challenge expired"})),
+        ));
+    }
+
+    if body.nonce != expected_nonce {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"ok": false, "error": "nonce mismatch"})),
+        ));
+    }
+
+    let receipt = json!({
+        "session_id": body.session_id,
+        "verified_at": now_ms(),
+        "nonce": body.nonce,
+        "ok": true
+    });
+
+    state
+        .store
+        .put_evidence(
+            &format!("challenge-ok-{}", body.session_id),
+            &receipt,
+        )
+        .map_err(store_error)?;
+
+    Ok(Json(json!({ "ok": true, "verified": true, "receipt": receipt })))
 }
 
 fn store_error(error: store::StoreError) -> (StatusCode, Json<Value>) {
@@ -387,6 +472,7 @@ fn app(state: Arc<AppState>) -> Router {
         .route("/v1/sessions", post(create_session))
         .route("/v1/ingest", post(ingest))
         .route("/v1/challenges/{session_id}", post(issue_challenge))
+        .route("/v1/challenge-response", post(verify_challenge_response))
         .route("/v1/decisions/{session_id}", get(get_decision))
         .route("/v1/policy/{game_id}", get(get_policy).put(put_policy))
         .layer(CorsLayer::permissive())

@@ -33,6 +33,10 @@
     "enable_hollowing_scan": true,
     "enable_mitigation_scan": true,
     "enable_stealth_scan": true,
+    "enable_writable_image_scan": true,
+    "enable_persistence_scan": true,
+    "enable_port_scan": true,
+    "enable_etw_scan": true,
     "enable_evidence_window": true,
     "evidence_window_ms": 45000,
     "evidence_min_samples": 3,
@@ -507,6 +511,10 @@
     "syscall_stub": 60,
     "hollowing": 70,
     "mitigation": 40,
-    "stealth": 65
+    "stealth": 65,
+    "writable_image": 55,
+    "persistence": 50,
+    "suspicious_port": 35,
+    "etw_patch": 70
   }
 }
